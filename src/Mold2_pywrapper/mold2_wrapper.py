@@ -8,6 +8,7 @@ import json
 import os
 import re
 import stat
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -26,9 +27,19 @@ from rdkit.Chem import AllChem
 class Mold2:
     """Mold2 wrapper to obtain molecular descriptors."""
 
-    def __init__(self):
-        """Instantiate a wrapper to calculate Mold2 molecular descriptors."""
-        self._download_executables()
+    def __init__(self, verbose: bool = True):
+        """Instantiate a wrapper to calculate Mold2 molecular descriptors.
+
+        :param verbose: Should details about the download of executables be printed out
+        """
+        if not hasattr(self, '_dir'):
+            self._dir = tempfile.mkdtemp(prefix='Mold2_')
+        self._download_executables(verbose)
+
+    def __del__(self):
+        """Remove downloaded executables."""
+        if os.path.isdir(self._dir):
+            shutil.rmtree(self._dir)
 
     def calculate(self, mols: Iterable[Chem.Mol], show_banner: bool = True, njobs: int = 1,
                   chunksize: int = 100) -> pd.DataFrame:
@@ -69,8 +80,7 @@ class Mold2:
             self._parse_details()
         return self._details
 
-    @classmethod
-    def from_executable(cls, zipfile_path: str) -> Mold2:
+    def from_executable(self, zipfile_path: str) -> Mold2:
         """Instantiate a Mold2 object from the user-downloaded mold2 zip file containing binaries.
 
         The provided ZIP file is extracted, so that default instantiation of Mold2 is henceforth possible.
@@ -79,7 +89,7 @@ class Mold2:
         :param zipfile_path: Path to the zip file containing Mold2 binaries
         :return: a Mold2 calculator object
         """
-        cls._extract_executables(zipfile_path)
+        self._extract_executables(zipfile_path)
         return Mold2()
 
     def _show_banner(self):
@@ -117,13 +127,17 @@ DOI: 10.1021/ci800038f
         with open(os.path.join(__file__, os.pardir, 'descriptors.json')) as jfile:
             self._details = json.load(jfile)
 
-    def _download_executables(self) -> None:
-        """Download executables from the FDA website."""
-        mold2_folder = os.path.abspath(os.path.join(__file__, os.pardir, 'extras'))
+    def _download_executables(self, verbose: bool = True) -> None:
+        """Download executables from the FDA website.
+
+        :param verbose: Should details about the download of executables be printed out
+        """
+        mold2_folder = os.path.abspath(os.path.join(self._dir, 'extras'))
         if not os.path.isdir(os.path.join(mold2_folder, 'Mold2')):
-            # Display iformation
-            print('The executables will be installed and are being downloaded from\n'
-                  'https://www.fda.gov/science-research/bioinformatics-tools/mold2')
+            if verbose:
+                # Display information
+                print('The executables will be installed and are being downloaded from\n'
+                      'https://www.fda.gov/science-research/bioinformatics-tools/mold2')
             # Download Mold2
             session = requests.session()
             res = session.get("https://www.fda.gov/files/science%20&%20research/published/Mold2-Executable-File.zip",
@@ -143,16 +157,16 @@ DOI: 10.1021/ci800038f
             self._extract_executables(zip_path)
             # Remove ZIP file
             os.remove(zip_path)
-            # Display information
-            print('Download and installation are now complete.\n')
+            if verbose:
+                # Display information
+                print('Download and installation are now complete.\n')
 
-    @classmethod
-    def _extract_executables(cls, zip_path: str) -> None:
+    def _extract_executables(self, zip_path: str) -> None:
         """Extract executables from the ZIP file.
 
         :param zip_path: Path to the zip file containing Mold2 executables
         """
-        mold2_folder = os.path.abspath(os.path.join(__file__, os.pardir, 'extras'))
+        mold2_folder = os.path.abspath(os.path.join(self._dir, 'extras'))
         # Extract Zip file
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(mold2_folder)
@@ -162,7 +176,7 @@ DOI: 10.1021/ci800038f
         os.rename(os.path.join(mold2_folder, 'Mold2', 'Windows', 'Mold2.txt'),
                   os.path.join(mold2_folder, 'Mold2', 'Windows', 'Mold2.bat'))
         # Make files executable
-        if platform.startswith('linux'):
+        if platform in ('linux', 'darwin'):
             os.chmod(os.path.join(mold2_folder, 'Mold2', 'Windows', 'Mold2.exe'), stat.S_IXUSR)
             os.chmod(os.path.join(mold2_folder, 'Mold2', 'Linux_x86-32', 'Mold2'), stat.S_IXUSR)
             os.chmod(os.path.join(mold2_folder, 'Mold2', 'Linux_x86-64', 'Mold2'), stat.S_IXUSR)
@@ -191,7 +205,7 @@ DOI: 10.1021/ci800038f
         :param log: If not None, path to the log file tobe created
         :return: Internal command to be run to obtain descriptors
         """
-        mold2_folder = os.path.abspath(os.path.join(__file__, os.pardir, 'extras'))
+        mold2_folder = os.path.abspath(os.path.join(self._dir, 'extras'))
         # Exceptions to ensure execution security of subprocess
         if not os.path.isdir(mold2_folder):
             raise RuntimeError('Could not locate Mold2 executables. Were they downloaded first?')

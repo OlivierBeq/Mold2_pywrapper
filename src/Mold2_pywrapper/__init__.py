@@ -4,4 +4,4 @@
 
 from .mold2_wrapper import Mold2
 
-__version__ = "0.0.1-post2"
+__version__ = "0.0.2-post1"
