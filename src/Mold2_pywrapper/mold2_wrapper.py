@@ -18,6 +18,7 @@ from typing import Iterable, List, Optional
 
 import more_itertools
 import pandas as pd
+import pystow
 import requests
 from bounded_pool_executor import BoundedProcessPoolExecutor
 from rdkit import Chem
@@ -32,8 +33,10 @@ class Mold2:
 
         :param verbose: Should details about the download of executables be printed out
         """
-        if not hasattr(self, '_dir'):
-            self._dir = tempfile.mkdtemp(prefix='Mold2_')
+        # Default folder for Mold2 executables
+        self._zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
+                                                                'Mold2-Executable-File.zip'))
+        # Ensure executables are available
         self._download_executables(verbose)
 
     def __del__(self):
@@ -42,7 +45,7 @@ class Mold2:
             shutil.rmtree(self._dir)
 
     def calculate(self, mols: Iterable[Chem.Mol], show_banner: bool = True, njobs: int = 1,
-                  chunksize: int = 100) -> pd.DataFrame:
+                  chunksize: Optional[int] = 1000) -> pd.DataFrame:
         """Caclulate Mold2 descriptors.
 
         :param mols: RDkit molecules for which Mold2 descriptors should be calculated
@@ -89,7 +92,7 @@ class Mold2:
         :param zipfile_path: Path to the zip file containing Mold2 binaries
         :return: a Mold2 calculator object
         """
-        self._extract_executables(zipfile_path)
+        shutil.copy(zipfile_path, self._zipfile)
         return Mold2()
 
     def _show_banner(self):
@@ -132,8 +135,7 @@ DOI: 10.1021/ci800038f
 
         :param verbose: Should details about the download of executables be printed out
         """
-        mold2_folder = os.path.abspath(os.path.join(self._dir, 'extras'))
-        if not os.path.isdir(os.path.join(mold2_folder, 'Mold2')):
+        if not os.path.isfile(self._zipfile):
             if verbose:
                 # Display information
                 print('The executables will be installed and are being downloaded from\n'
@@ -146,17 +148,10 @@ DOI: 10.1021/ci800038f
                                                      "Chrome/39.0.2171.95 "
                                                      "Safari/537.36"},
                               stream=True, verify=True)
-            zip_path = os.path.abspath(os.path.join(mold2_folder, 'Mold2-Executable-File.zip'))
-            # Connection established, safely create out folder
-            os.makedirs(mold2_folder, exist_ok=True)
             # Save ZIP file
-            with open(zip_path, 'wb') as fh:
+            with open(self._zipfile, 'wb') as fh:
                 for chunk in res.iter_content(chunk_size=1024):
                     fh.write(chunk)
-            # Extract executables
-            self._extract_executables(zip_path)
-            # Remove ZIP file
-            os.remove(zip_path)
             if verbose:
                 # Display information
                 print('Download and installation are now complete.\n')
@@ -239,7 +234,7 @@ DOI: 10.1021/ci800038f
         """
         # Run calculation
         with open(os.devnull, 'wb') as devnull:
-            x = subprocess.check_output(command, shell=True, stderr=devnull)  # noqa: S602
+            _ = subprocess.check_output(command, shell=True, stderr=devnull)  # noqa: S602
 
     def _parse_result(self, output_path: str) -> pd.DataFrame:
         """Read a Mold2 output file and convert to a DataFrame.
@@ -248,7 +243,7 @@ DOI: 10.1021/ci800038f
         :return: a pandas DataFrame containing all Mold2 desciptor values
         """
         # Read results
-        data = pd.read_table(output_path, header=None, usecols=range(1, 778))
+        data = pd.read_table(output_path, header=None, usecols=range(1, 778), low_memory=False)
         if data.iloc[0, 0] != 'D001':
             # Header is not provided if first molecule failed
             data.columns = [f'D{x:03d}' for x in range(1, 778)]
@@ -265,6 +260,12 @@ DOI: 10.1021/ci800038f
         :param mols: RDkit molecules for which Mold2 descriptors should be calculated
         :return: a pandas DataFrame containing all Mold2 desciptor values
         """
+        # Copy of executables for this instance
+        if not hasattr(self, '_dir'):
+            self._dir = tempfile.mkdtemp(prefix='Mold2_')
+        if not os.path.isdir(os.path.join(self._dir, 'extras')):
+            # Extract executables
+            self._extract_executables(self._zipfile)
         input_path = self._prepare_input(mols)
         output = mktempfile('.txt')
         mold2_command = self._prepare_command(input_path=input_path, output_path=output, log=None)
