@@ -127,7 +127,7 @@ DOI: 10.1021/ci800038f
 
     def _parse_details(self):
         """Parse descriptor details."""
-        with open(os.path.join(__file__, os.pardir, 'descriptors.json')) as jfile:
+        with open(os.path.abspath(os.path.join(__file__, os.pardir, 'descriptors.json'))) as jfile:
             self._details = json.load(jfile)
 
     def _download_executables(self, verbose: bool = True) -> None:
