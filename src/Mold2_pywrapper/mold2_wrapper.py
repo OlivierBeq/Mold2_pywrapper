@@ -251,7 +251,7 @@ DOI: 10.1021/ci800038f
             data.columns = data.iloc[0, :]
             data.drop(index=0, inplace=True)
         data.reset_index(drop=True, inplace=True)
-        data = pd.to_numeric(data, errors='coerce')
+        data = data.apply(pd.to_numeric, errors='coerce', axis=1)
         data = data.convert_dtypes()
         return data
 
