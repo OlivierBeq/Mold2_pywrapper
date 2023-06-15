@@ -7,8 +7,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 import shutil
+import stat
 import subprocess
 import tempfile
 import zipfile
@@ -35,7 +35,7 @@ class Mold2:
         """
         # Default folder for Mold2 executables
         self._zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
-                                                                'Mold2-Executable-File.zip'))
+                                                     'Mold2-Executable-File.zip'))
         # Ensure executables are available
         self._download_executables(verbose)
 
@@ -251,6 +251,7 @@ DOI: 10.1021/ci800038f
             data.columns = data.iloc[0, :]
             data.drop(index=0, inplace=True)
         data.reset_index(drop=True, inplace=True)
+        data = data.apply(lambda x: pd.to_numeric(x, errors='coerce'))
         data = data.convert_dtypes()
         return data
 
