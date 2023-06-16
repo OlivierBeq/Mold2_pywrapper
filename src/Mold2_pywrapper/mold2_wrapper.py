@@ -7,8 +7,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import stat
 import shutil
+import stat
 import subprocess
 import tempfile
 import zipfile
@@ -35,7 +35,7 @@ class Mold2:
         """
         # Default folder for Mold2 executables
         self._zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
-                                                                'Mold2-Executable-File.zip'))
+                                                     'Mold2-Executable-File.zip'))
         # Ensure executables are available
         self._download_executables(verbose)
 
