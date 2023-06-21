@@ -28,14 +28,15 @@ from rdkit.Chem import AllChem
 class Mold2:
     """Mold2 wrapper to obtain molecular descriptors."""
 
+    # Default folder for Mold2 executables
+    _zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
+                                            'Mold2-Executable-File.zip'))
+
     def __init__(self, verbose: bool = True):
         """Instantiate a wrapper to calculate Mold2 molecular descriptors.
 
         :param verbose: Should details about the download of executables be printed out
         """
-        # Default folder for Mold2 executables
-        self._zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
-                                                     'Mold2-Executable-File.zip'))
         # Ensure executables are available
         self._download_executables(verbose)
 
@@ -83,7 +84,8 @@ class Mold2:
             self._parse_details()
         return self._details
 
-    def from_executable(self, zipfile_path: str) -> Mold2:
+    @staticmethod
+    def from_executable(zipfile_path: str) -> Mold2:
         """Instantiate a Mold2 object from the user-downloaded mold2 zip file containing binaries.
 
         The provided ZIP file is extracted, so that default instantiation of Mold2 is henceforth possible.
@@ -92,7 +94,7 @@ class Mold2:
         :param zipfile_path: Path to the zip file containing Mold2 binaries
         :return: a Mold2 calculator object
         """
-        shutil.copy(zipfile_path, self._zipfile)
+        shutil.copy(zipfile_path, Mold2._zipfile)
         return Mold2()
 
     def _show_banner(self):
