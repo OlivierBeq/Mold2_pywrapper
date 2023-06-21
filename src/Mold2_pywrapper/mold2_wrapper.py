@@ -37,6 +37,8 @@ class Mold2:
 
         :param verbose: Should details about the download of executables be printed out
         """
+        if platform not in ['win32', 'linux']:
+            raise RuntimeError(f'Mold2 descriptors can only be calculated on Windows and Linux platforms.')
         # Ensure executables are available
         self._download_executables(verbose)
 
