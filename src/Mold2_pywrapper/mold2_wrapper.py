@@ -44,7 +44,7 @@ class Mold2:
 
     def __del__(self):
         """Remove downloaded executables."""
-        if os.path.isdir(self._dir):
+        if hasattr(self, '_dir') and os.path.isdir(self._dir):
             shutil.rmtree(self._dir)
 
     def calculate(self, mols: Iterable[Chem.Mol], show_banner: bool = True, njobs: int = 1,
@@ -255,7 +255,6 @@ DOI: 10.1021/ci800038f
             data.columns = data.iloc[0, :]
             data.drop(index=0, inplace=True)
         data.reset_index(drop=True, inplace=True)
-        data = data.apply(pd.to_numeric, errors='coerce', axis=1)
         data = data.convert_dtypes()
         return data
 
@@ -276,6 +275,8 @@ DOI: 10.1021/ci800038f
         mold2_command = self._prepare_command(input_path=input_path, output_path=output, log=None)
         self._run_command(mold2_command)
         data = self._parse_result(output_path=output)
+        data = data.apply(pd.to_numeric, errors='coerce', axis=1)
+        data = data.convert_dtypes()
         os.remove(input_path)
         os.remove(output)
         return data
