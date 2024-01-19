@@ -14,9 +14,10 @@ import tempfile
 import zipfile
 from platform import architecture
 from sys import platform
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Union
 
 import more_itertools
+import numpy as np
 import pandas as pd
 import pystow
 import requests
@@ -32,13 +33,17 @@ class Mold2:
     _zipfile = os.path.abspath(os.path.join(pystow.join('Mold2').as_posix(),
                                             'Mold2-Executable-File.zip'))
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, fill_na: Union[str, float] = None, verbose: bool = True):
         """Instantiate a wrapper to calculate Mold2 molecular descriptors.
 
+        :param fill_na: value to fill undefined values by; may be a number or one of {'median', 'mean', 'NaN'}
         :param verbose: Should details about the download of executables be printed out
         """
         if platform not in ['win32', 'linux']:
             raise RuntimeError(f'Mold2 descriptors can only be calculated on Windows and Linux platforms.')
+        if fill_na is not None and (not np.isreal(fill_na) and fill_na not in ['median', 'mean', 'NaN']):
+            raise ValueError("Can only fill undefined values by a float or one of {'median', 'mean', 'NaN'}")
+        self.fill_na = fill_na
         # Ensure executables are available
         self._download_executables(verbose)
 
@@ -255,7 +260,6 @@ DOI: 10.1021/ci800038f
             data.columns = data.iloc[0, :]
             data.drop(index=0, inplace=True)
         data.reset_index(drop=True, inplace=True)
-        data = data.convert_dtypes()
         return data
 
     def _calculate(self, mols: List[Chem.Mol]) -> pd.DataFrame:
@@ -275,8 +279,7 @@ DOI: 10.1021/ci800038f
         mold2_command = self._prepare_command(input_path=input_path, output_path=output, log=None)
         self._run_command(mold2_command)
         data = self._parse_result(output_path=output)
-        data = data.apply(pd.to_numeric, errors='coerce', axis=1)
-        data = data.convert_dtypes()
+        data = data.apply(convert_to_numeric, axis=0, args=(self.fill_na,))
         os.remove(input_path)
         os.remove(output)
         return data
@@ -313,3 +316,32 @@ def fix_bond_blocks(path: str) -> None:
                 outfile.write(line)
     os.remove(path)
     os.rename(temp_out, path)
+
+
+def convert_to_numeric(series: pd.Series, fill_value: Optional[Union[float, str]] = None) -> pd.Series:
+    """Convert a ``pandas.Series`` to numeric dtype.
+    ``pd.to_numeric`` does not handle nans, so this function masks the nans, converts and then
+    reinserts them.
+
+    :param series: series to convert.
+    :param fill_value: value to replace NaN values by
+    :return: the converted series
+    """
+    # Identify NAs, convert to numeric and set NAs back
+    nan_mask = pd.isna(series)
+    series[nan_mask] = 0
+    column = pd.to_numeric(series, errors='coerce')
+    column[nan_mask] = np.NaN
+    # Replace NaNs by custom value
+    if fill_value is not None:
+        mask = pd.isna(column) | (column == 3.4028199999999998e+38)  # undefined Mold2 value
+        if np.isreal(fill_value):
+            fn = lambda x: fill_value
+        elif isinstance(fill_value, str) and fill_value.lower() == 'nan':
+            fn     = lambda x: np.NaN
+        elif fill_value == 'median':
+            fn = np.median
+        elif fill_value == 'mean':
+            fn = np.mean
+        column[mask] = fn(column[~mask])
+    return column
