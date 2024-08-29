@@ -4,4 +4,4 @@
 
 from .mold2_wrapper import Mold2
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

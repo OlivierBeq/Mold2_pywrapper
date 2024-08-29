@@ -152,10 +152,17 @@ DOI: 10.1021/ci800038f
             # Download Mold2
             session = requests.session()
             res = session.get("https://www.fda.gov/files/science%20&%20research/published/Mold2-Executable-File.zip",
-                              headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_1) "
+                              headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                                                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                                     "Chrome/39.0.2171.95 "
-                                                     "Safari/537.36"},
+                                                     "Chrome/128.0.0.0 "
+                                                     "Safari/537.36",
+                                       "cache-control": "public, max-age=27440",
+                                       "content-type": "text/html; charset=UTF-8",
+                                       "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                                                 "image/avif,image/webp,image/apng,*/*;q=0.8,"
+                                                 "application/signed-exchange;v=b3;q=0.7",
+                                       "accept-encoding": "gzip, deflate, br, zstd",
+                                       "accept-language": "en-US;q=0.9,en;q=0.8"},
                               stream=True, verify=True)
             # Save ZIP file
             with open(self._zipfile, 'wb') as fh:
