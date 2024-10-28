@@ -41,8 +41,8 @@ class Mold2:
         """
         if platform not in ['win32', 'linux']:
             raise RuntimeError(f'Mold2 descriptors can only be calculated on Windows and Linux platforms.')
-        if fill_na is not None and (not np.isreal(fill_na) and fill_na not in ['median', 'mean', 'NaN']):
-            raise ValueError("Can only fill undefined values by a float or one of {'median', 'mean', 'NaN'}")
+        if fill_na is not None and (not np.isreal(fill_na) and fill_na.lower() not in ['median', 'mean', 'nan']):
+            raise ValueError("Can only fill undefined values by a float or one of {'median', 'mean', 'nan'}")
         self.fill_na = fill_na
         # Ensure executables are available
         self._download_executables(verbose)
@@ -338,14 +338,14 @@ def convert_to_numeric(series: pd.Series, fill_value: Optional[Union[float, str]
     nan_mask = pd.isna(series)
     series[nan_mask] = 0
     column = pd.to_numeric(series, errors='coerce')
-    column[nan_mask] = np.NaN
+    column[nan_mask] = np.nan
     # Replace NaNs by custom value
     if fill_value is not None:
         mask = pd.isna(column) | (column == 3.4028199999999998e+38)  # undefined Mold2 value
         if np.isreal(fill_value):
             fn = lambda x: fill_value
         elif isinstance(fill_value, str) and fill_value.lower() == 'nan':
-            fn     = lambda x: np.NaN
+            fn     = lambda x: np.nan
         elif fill_value == 'median':
             fn = np.median
         elif fill_value == 'mean':
