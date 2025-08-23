@@ -3,10 +3,13 @@
 <!-- Badges -->
 <div align="center">
 
-[![CI](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/mold2-pywrapper.svg)](https://pypi.org/project/mold2-pywrapper/)
 [![Supported Python versions](https://img.shields.io/pypi/pyversions/mold2-pywrapper.svg)](https://pypi.org/project/mold2-pywrapper/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml)
+[![Code Quality](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/linting.yml/badge.svg)](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/linting.yml)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 <br>
 ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
