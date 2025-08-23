@@ -117,7 +117,7 @@ print(all_descriptors['D001'])
 
 This project is licensed under the MIT License - see the [LICENSE](https://github.com/OlivierBeq/Mold2_pywrapper/blob/master/LICENSE) file for details.
 
-## Documentation
+## API Documentation
 
 ```python
 def calculate(mols, show_banner=True, njobs=1, chunksize=100):
