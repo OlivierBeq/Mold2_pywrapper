@@ -47,12 +47,16 @@ class Mold2TestCase(unittest.TestCase):
 
         # Let's assume a successful calculation would produce a result
         # We will mock the parser to return a dummy result.
-        with patch("src.Mold2_pywrapper.mold2_wrapper.Mold2._parse_result") as mock_parse:
+        with patch(
+            "src.Mold2_pywrapper.mold2_wrapper.Mold2._parse_result"
+        ) as mock_parse:
             import pandas as pd
             import numpy as np
 
             # Create a fake DataFrame that _parse_result will return
-            mock_df = pd.DataFrame(np.random.rand(1, 777), columns=[f"D{i:03d}" for i in range(1, 778)])
+            mock_df = pd.DataFrame(
+                np.random.rand(1, 777), columns=[f"D{i:03d}" for i in range(1, 778)]
+            )
             mock_parse.return_value = mock_df
 
             # Now, call the function we are testing
