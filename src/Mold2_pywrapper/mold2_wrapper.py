@@ -29,10 +29,13 @@ from rdkit.Chem import AllChem
 class Mold2:
     """Mold2 wrapper to obtain molecular descriptors."""
 
-    # Default folder for Mold2 executables
-    _zipfile = os.path.abspath(
-        os.path.join(pystow.join("Mold2").as_posix(), "Mold2-Executable-File.zip")
-    )
+    @property
+    def _zipfile(self) -> str:
+        # Default folder for Mold2 executables
+        _zipfile = os.path.abspath(
+            os.path.join(pystow.join("Mold2").as_posix(), "Mold2-Executable-File.zip")
+        )
+        return _zipfile
 
     def __init__(self, fill_na: Union[str, float] = None, verbose: bool = True):
         """Instantiate a wrapper to calculate Mold2 molecular descriptors.
@@ -191,6 +194,8 @@ DOI: 10.1021/ci800038f
                 stream=True,
                 verify=True,
             )
+            # Raise an exception if needed
+            res.raise_for_status()
             # Save ZIP file
             with open(self._zipfile, "wb") as fh:
                 for chunk in res.iter_content(chunk_size=1024):
