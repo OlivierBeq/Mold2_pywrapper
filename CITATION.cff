@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this library, please refer to the original article for reference, along with the following:"
+authors:
+- family-names: "Béquignon"
+  given-names: "Olivier J. M."
+  orcid: "https://orcid.org/0000-0002-7554-9220"
+title: "Mold2-pywrapper"
+version: 0.1.2
+url: "https://github.com/OlivierBeq/mold2_pywrapper"
