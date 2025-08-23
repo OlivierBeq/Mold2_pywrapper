@@ -1,0 +1,44 @@
+# .github/workflows/ci.yml
+
+name: Run Tests
+
+# --- Triggers ---
+# This workflow runs on every push to any branch and every pull request.
+on: [push, pull_request]
+
+jobs:
+  test:
+    # --- Job Environment ---
+    # Use the latest version of Ubuntu to run the job
+    runs-on: ${{ matrix.os }}
+
+    # --- Test Matrix ---
+    # Run the tests on all supported Python versions
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      # --- 1. Check out the repository code ---
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # --- 2. Set up the specific Python version from the matrix ---
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # --- 3. Install dependencies ---
+      # This step installs your package along with its testing dependencies (pytest)
+      # using the [testing] extra you defined in setup.cfg.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[testing]
+
+      # --- 4. Run the tests ---
+      # This command discovers and runs all tests using pytest.
+      - name: Run tests with pytest
+        run: pytest
