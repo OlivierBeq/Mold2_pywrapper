@@ -16,7 +16,7 @@ jobs:
     # Run the tests on all supported Python versions
     strategy:
       matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
         os: [ubuntu-latest, windows-latest]
 
     steps:
@@ -32,13 +32,12 @@ jobs:
 
       # --- 3. Install dependencies ---
       # This step installs your package along with its testing dependencies (pytest)
-      # using the [testing] extra you defined in setup.cfg.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install .[testing]
+          pip install .
 
       # --- 4. Run the tests ---
-      # This command discovers and runs all tests using pytest.
-      - name: Run tests with pytest
-        run: pytest
+      # This command discovers and runs all tests using unittest.
+      - name: Run tests with unittest
+        run: python -m unittest discover tests/

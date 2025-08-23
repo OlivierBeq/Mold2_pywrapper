@@ -1,6 +1,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)  
+[![CI](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/ci.yml) ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white) ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)  
 
 # Mold² Python wrapper
 
@@ -149,5 +149,3 @@ Install executables and instantiate a Mold2 calculator.
 
 - ***zipfile_path  : str***  
   Path to the user-downloaded ZIP file containing Mold2 executables.
-
-
