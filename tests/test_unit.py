@@ -39,6 +39,7 @@ class TestHelperFunctions(unittest.TestCase):
                 fix_bond_blocks("dummy_path.sdf")
 
 
+@patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
 class TestMold2Unit(unittest.TestCase):
     """
     Unit tests for the Mold2 class methods.
@@ -59,19 +60,6 @@ class TestMold2Unit(unittest.TestCase):
             mold2.descriptor_detail(0)
         with self.assertRaises(ValueError):
             mold2.descriptor_detail(778)
-
-    @patch("requests.session")
-    def test_download_path(self, mock_session):
-        """Test that the download logic is called when the zip is missing."""
-        mock_get = mock_session.return_value.get
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.iter_content.return_value = [b"fake zip content"]
-
-        # Instantiate the Mold2 class *inside* the patch to ensure __init__ runs
-        # in the mocked environment where the file does not exist.
-        with patch("os.path.isfile", return_value=False):
-            Mold2_pywrapper.Mold2(verbose=True)
-            mock_get.assert_called_once()
 
     @unittest.skipIf(os.name == "nt", "Parallel processing test is skipped on Windows")
     @patch("Mold2_pywrapper.mold2_wrapper.BoundedProcessPoolExecutor")
@@ -147,3 +135,81 @@ class TestMold2Unit(unittest.TestCase):
         with patch("zipfile.ZipFile"), patch("os.rename"):
             mold2._extract_executables("dummy.zip")
             self.assertGreater(mock_chmod.call_count, 0)
+
+    def test_show_banner_path(self):
+        """Cover the `show_banner=True` path in calculate()."""
+        mold2 = Mold2_pywrapper.Mold2()
+        # Mock the internal methods to isolate the banner logic
+        with patch.object(mold2, "_show_banner") as mock_banner, patch.object(
+            mold2, "_calculate", return_value=pd.DataFrame()
+        ):
+            mold2.calculate(mols=[], show_banner=True)
+            mock_banner.assert_called_once()
+
+    def test_del_method_no_dir(self):
+        """Cover the __del__ path where _dir was never created."""
+        mold2 = Mold2_pywrapper.Mold2()
+        # The _dir attribute is not set, so __del__ should do nothing.
+        # This test passes if no error is raised during garbage collection.
+        del mold2
+        gc.collect()
+
+    def test_descriptor_detail_lazy_loading(self):
+        """Cover the lazy-loading path specifically for descriptor_detail."""
+        mold2 = Mold2_pywrapper.Mold2()
+        self.assertFalse(hasattr(mold2, "_details"))
+        # Calling descriptor_detail should trigger the lazy load.
+        detail = mold2.descriptor_detail(1)
+        self.assertTrue(hasattr(mold2, "_details"))
+        self.assertIsNotNone(detail)
+
+    @patch("shutil.copy")
+    def test_from_executable_return_value(self, mock_copy):
+        """Cover the return statement of the from_executable static method."""
+        # We patch shutil.copy because we only care about the return value here.
+        result = Mold2_pywrapper.Mold2.from_executable("dummy_path.zip")
+        self.assertIsInstance(result, Mold2_pywrapper.Mold2)
+
+    @patch("Mold2_pywrapper.mold2_wrapper.platform", "win32")
+    def test_prepare_command_on_windows(self):
+        """Cover the command preparation logic for Windows."""
+        mold2 = Mold2_pywrapper.Mold2()
+        mold2._dir = "/fake/dir"
+        with patch("os.path.isdir", return_value=True), patch(
+            "os.path.isfile", return_value=True
+        ):
+            command = mold2._prepare_command("input.sdf", "output.txt")
+            self.assertIn("Mold2.exe", command)
+            self.assertIn("echo.", command)
+
+    def test_prepare_command_bad_paths(self):
+        """Cover the error handling for non-existent paths."""
+        mold2 = Mold2_pywrapper.Mold2()
+        mold2._dir = "/fake/dir"
+        # Test case where mold2_folder does not exist
+        with patch("os.path.isdir", return_value=False):
+            with self.assertRaises(RuntimeError):
+                mold2._prepare_command("input.sdf", "output.txt")
+        # Test case where input_path does not exist
+        with patch("os.path.isdir", return_value=True), patch(
+            "os.path.isfile", return_value=False
+        ):
+            with self.assertRaises(ValueError):
+                mold2._prepare_command("input.sdf", "output.txt")
+
+
+class TestMold2Download(unittest.TestCase):
+    """A dedicated test case for the download logic."""
+
+    @patch("requests.session")
+    def test_download_path(self, mock_session):
+        """Test that the download logic is called when the zip is missing."""
+        mock_get = mock_session.return_value.get
+        mock_get.return_value.raise_for_status.return_value = None
+        mock_get.return_value.iter_content.return_value = [b"fake zip content"]
+
+        with patch("os.path.isfile", return_value=False):
+            # We must also patch the final `open` call to prevent a FileNotFoundError
+            with patch("builtins.open", unittest.mock.mock_open()):
+                Mold2_pywrapper.Mold2(verbose=True)
+                mock_get.assert_called_once()

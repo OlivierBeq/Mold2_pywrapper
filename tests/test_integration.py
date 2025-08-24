@@ -46,7 +46,7 @@ class TestMold2Integration(unittest.TestCase):
         self.assertEqual(result_df.shape, (2, 777))
         self.assertEqual(result_df.loc[0, "D024"], 2)
 
-    @unittest.skipIf(os.name == 'nt', "Parallel processing test is skipped on Windows")
+    @unittest.skipIf(os.name == "nt", "Parallel processing test is skipped on Windows")
     def test_parallel_calculation(self):
         """Test the parallel processing path with njobs > 1."""
         shutil.copy(DOWNLOADED_MOLD2_ZIP, self.patched_path)
