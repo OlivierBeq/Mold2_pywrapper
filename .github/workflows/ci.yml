@@ -54,6 +54,7 @@ jobs:
             echo "::error::Failed to download the asset."
             exit 1
           fi
+          echo "DOWNLOADED_MOLD2_ZIP_PATH=${{ github.workspace }}/$ASSET_FILENAME" >> $GITHUB_ENV
           echo "Asset downloaded successfully."
 
 

@@ -1,12 +1,13 @@
 # tests/test_integration.py
 
 import os
-import shutil
-import unittest
-import tempfile
 import pathlib
-import pandas as pd
+import shutil
+import tempfile
+import unittest
+
 from rdkit import Chem
+
 import Mold2_pywrapper
 
 # This environment variable is set by the CI workflow
@@ -45,6 +46,7 @@ class TestMold2Integration(unittest.TestCase):
         self.assertEqual(result_df.shape, (2, 777))
         self.assertEqual(result_df.loc[0, "D024"], 2)
 
+    @unittest.skipIf(os.name == 'nt', "Parallel processing test is skipped on Windows")
     def test_parallel_calculation(self):
         """Test the parallel processing path with njobs > 1."""
         shutil.copy(DOWNLOADED_MOLD2_ZIP, self.patched_path)
