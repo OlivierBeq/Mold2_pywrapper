@@ -197,6 +197,42 @@ class TestMold2Unit(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mold2._prepare_command("input.sdf", "output.txt")
 
+    @patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin")
+    def test_init_error_on_bad_platform(self):
+        """Cover the RuntimeError for unsupported platforms in __init__."""
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mold2 descriptors can only be calculated on Windows and Linux platforms",
+        ):
+            Mold2_pywrapper.Mold2()
+
+    @patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin")
+    def test_prepare_command_error_on_bad_platform(self):
+        """Cover the RuntimeError for unsupported platforms in _prepare_command."""
+        with self.assertRaisesRegex(
+                RuntimeError,
+                "Mold2 descriptors can only be calculated on Windows and Linux platforms",
+        ):
+            mold2 = Mold2_pywrapper.Mold2()
+            mold2._dir = "/fake/dir"
+            with patch("os.path.isdir", return_value=True), patch(
+                    "os.path.isfile", return_value=True
+            ):
+                mold2._prepare_command("input.sdf", "output.txt")
+
+    def test_prepare_command_bad_output_path(self):
+        """Cover the ValueError for a non-existent output directory."""
+        mold2 = Mold2_pywrapper.Mold2()
+        mold2._dir = "/fake/dir"
+        # Simulate os.path.isdir returning False for the output directory
+        with patch("os.path.isdir", side_effect=[True, False]), patch(
+            "os.path.isfile", return_value=True
+        ):
+            with self.assertRaisesRegex(
+                ValueError, "Path to output file does not exist"
+            ):
+                mold2._prepare_command("input.sdf", "/bad/path/output.txt")
+
 
 class TestMold2Download(unittest.TestCase):
     """A dedicated test case for the download logic."""
