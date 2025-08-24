@@ -137,14 +137,15 @@ class TestMold2Unit(unittest.TestCase):
             self.assertGreater(mock_chmod.call_count, 0)
 
     def test_show_banner_path(self):
-        """Cover the `show_banner=True` path in calculate()."""
+        """Cover the `show_banner=True` path and the print statement within it."""
         mold2 = Mold2_pywrapper.Mold2()
-        # Mock the internal methods to isolate the banner logic
-        with patch.object(mold2, "_show_banner") as mock_banner, patch.object(
+        # We now mock `print` and let the REAL `_show_banner` be called.
+        with patch("builtins.print") as mock_print, patch.object(
             mold2, "_calculate", return_value=pd.DataFrame()
         ):
             mold2.calculate(mols=[], show_banner=True)
-            mock_banner.assert_called_once()
+            # Assert that the print function was called, which proves _show_banner ran.
+            mock_print.assert_called_once()
 
     def test_del_method_no_dir(self):
         """Cover the __del__ path where _dir was never created."""
@@ -210,13 +211,13 @@ class TestMold2Unit(unittest.TestCase):
     def test_prepare_command_error_on_bad_platform(self):
         """Cover the RuntimeError for unsupported platforms in _prepare_command."""
         with self.assertRaisesRegex(
-                RuntimeError,
-                "Mold2 descriptors can only be calculated on Windows and Linux platforms",
+            RuntimeError,
+            "Mold2 descriptors can only be calculated on Windows and Linux platforms",
         ):
             mold2 = Mold2_pywrapper.Mold2()
             mold2._dir = "/fake/dir"
             with patch("os.path.isdir", return_value=True), patch(
-                    "os.path.isfile", return_value=True
+                "os.path.isfile", return_value=True
             ):
                 mold2._prepare_command("input.sdf", "output.txt")
 
@@ -232,6 +233,22 @@ class TestMold2Unit(unittest.TestCase):
                 ValueError, "Path to output file does not exist"
             ):
                 mold2._prepare_command("input.sdf", "/bad/path/output.txt")
+
+    def test_prepare_command_raises_on_unsupported_platform(self):
+        """Cover the RuntimeError in _prepare_command for unsupported platforms."""
+        # 1. Instantiate the class normally. This succeeds because the platform is not yet patched.
+        mold2 = Mold2_pywrapper.Mold2()
+        mold2._dir = "/fake/dir"  # Set required attribute
+
+        # 2. Now, patch the platform to 'darwin' ONLY for the code inside this block.
+        with patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin"):
+            # 3. Assert that calling the method *inside the patched environment* raises the error.
+            with self.assertRaisesRegex(RuntimeError, "Platform .* not supported"):
+                # We also need to mock the os checks to get past them to the platform logic.
+                with patch("os.path.isdir", return_value=True), patch(
+                    "os.path.isfile", return_value=True
+                ):
+                    mold2._prepare_command("input.sdf", "output.txt")
 
 
 class TestMold2Download(unittest.TestCase):
