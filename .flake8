@@ -1,29 +1,22 @@
-###############################################
-# Flake8 Configuration                        #
-# (.flake8)                                   #
-# Adapted from https://github.com/pybel/pybel #
-###############################################
-
-# This config can't go in setup.cfg because Python's ConfigParser
-# used by setup.pg will interpolate on all of Scott's beautiful % signs
-# that make the pretty colored output
+# .flake8
 
 [flake8]
+# --- Flake8 Configuration ---
+# See: https://flake8.pycqa.org/en/latest/user/configuration.html
+
+# Set the maximum line length to match Black's default.
+max-line-length = 110
+
+# Ignore specific errors to make Flake8 compatible with Black.
+# E203: Whitespace before ':'
+# W503: Line break before binary operator
+ignore = E203, W503
+
+# Exclude files and directories that are not needed to be checked.
 exclude =
-    .tox,
-    .git,
-    __pycache__,
-    docs/source/conf.py,
-    build,
-    dist,
-    tests/fixtures/*,
-    *.pyc,
-    *.egg-info,
-    .cache,
+    .git
+    __pycache__
+    .tox
+    build
+    dist
     .eggs
-max-line-length = 120
-import-order-style = pycharm
-application-import-names =
-    iter_together
-    tests
-format = ${cyan}%(path)s${reset}:${yellow_bold}%(row)d${reset}:${green_bold}%(col)d${reset}: ${red_bold}%(code)s${reset} %(text)s

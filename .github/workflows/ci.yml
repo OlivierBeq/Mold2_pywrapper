@@ -1,0 +1,75 @@
+# .github/workflows/ci.yml
+
+name: Run Tests
+
+# --- Triggers ---
+# This workflow runs on every push to any branch and every pull request.
+on: [push, pull_request]
+
+jobs:
+  test:
+    # Use the latest version of Ubuntu to run the job
+    runs-on: ${{ matrix.os }}
+
+    # Run the tests on all supported Python versions
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Download Mold2 Executable
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          RELEASE_TAG="assets"
+          ASSET_FILENAME="mold2_exec.zip"
+
+          echo "Fetching asset ID..."
+          asset_id=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${RELEASE_TAG}" | \
+            jq '.assets[] | select(.name=="Mold2-Executable-File.zip") | .id')
+
+          if [ -z "$asset_id" ] || [ "$asset_id" == "null" ]; then
+            echo "::error::Could not find asset ID for 'Mold2-Executable-File.zip' in release '$RELEASE_TAG'."
+            exit 1
+          fi
+
+          echo "Downloading asset to the repository root..."
+          curl -L -o "$ASSET_FILENAME" \
+            -H "Accept: application/octet-stream" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/assets/${asset_id}"
+
+          if [ ! -f "$ASSET_FILENAME" ]; then
+            echo "::error::Failed to download the asset."
+            exit 1
+          fi
+          echo "DOWNLOADED_MOLD2_ZIP_PATH=${{ github.workspace }}/$ASSET_FILENAME" >> $GITHUB_ENV
+          echo "Asset downloaded successfully."
+
+
+      # This step installs the package along with its testing dependencies (pytest)
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . coverage
+
+      - name: Run tests with coverage
+        # Run tests using 'coverage' to measure which lines of code are executed
+        run: coverage run --source=src -m unittest discover tests/
+
+      - name: Upload coverage to Codecov
+        # Use the official Codecov Action to find and upload the report
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
