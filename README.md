@@ -19,7 +19,7 @@
 
 A simple and reliable Python wrapper for calculating Mold² molecular descriptors. This library automates the process of downloading, installing, and running the Mold² executables for seamless integration into your cheminformatics workflows.
 
-## Features
+## ✨ Features
 
 -   **Automated Installation**: Automatically downloads and sets up the correct Mold² executables for your operating system (Windows or Linux).
 -   **Simple API**: A clean and easy-to-use interface for calculating descriptors from RDKit molecule objects.
@@ -27,7 +27,7 @@ A simple and reliable Python wrapper for calculating Mold² molecular descriptor
 -   **Data Handling**: Returns descriptors in a convenient Pandas DataFrame, ready for analysis.
 -   **Descriptor Information**: Easily access details and descriptions for all 777 Mold² descriptors.
 
-## Copyright and Citation Notice
+## ✍️ Copyright and Citation Notice
 
 #### Mold² Software
 Mold² is a product designed and produced by the National Center for Toxicological Research (NCTR). FDA and NCTR retain ownership of this product. This Python wrapper is the work of Olivier J. M. Béquignon and is **not** affiliated with the original authors.
@@ -43,12 +43,12 @@ If you use this wrapper in your research, please cite the original Mold² public
     > Please refer to the `CITATION.cff` file for details on how to cite this library.
 
 
-## Requirements
+## 🛠️ Requirements
 
 -   Python 3.9+
 -   [RDKit](https://www.rdkit.org/docs/Install.html)
 
-## Installation
+## 📦 Installation
 
 You can install the wrapper from PyPI:
 
@@ -56,7 +56,7 @@ You can install the wrapper from PyPI:
 pip install mold2-pywrapper
 ```
 
-## Usage
+## 💡  Usage
 
 Here is a basic example of how to calculate Mold² descriptors for a list of molecules.
 
@@ -89,7 +89,7 @@ print(descriptors_df.head())
 ```
 
 
-### Working with Pre-Downloaded Executables
+### ⚙️ Working with Pre-Downloaded Executables
 
 If you have already downloaded the Mold² ZIP file from the [FDA website](https://www.fda.gov/science-research/bioinformatics-tools/mold2), you can install the executables directly from the file:
 
@@ -101,7 +101,7 @@ mold2 = Mold2.from_executable(path_to_zipfile)
 # You can now instantiate Mold2() normally.
 ```
 
-### Getting about descriptors
+### 🔍 Getting descriptors details
 
 You can retrieve the description for any of the 777 descriptors by its index or get a dictionary of all of them.
 
@@ -116,11 +116,11 @@ print(all_descriptors['D001'])
 # Output: number of 6-membered aromatic rings (only carbon atoms)
 ```
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](https://github.com/OlivierBeq/Mold2_pywrapper/blob/master/LICENSE) file for details.
 
-## API Documentation
+## 📚 API Documentation
 
 ```python
 def calculate(mols, show_banner=True, njobs=1, chunksize=100):
