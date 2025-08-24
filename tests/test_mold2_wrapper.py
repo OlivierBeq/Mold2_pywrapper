@@ -3,12 +3,9 @@
 import os
 import shutil
 import unittest
-from unittest.mock import patch
 import tempfile
 import pathlib
-import zipfile
 
-import requests
 import pandas as pd
 from rdkit import Chem
 
@@ -20,8 +17,10 @@ DOWNLOADED_MOLD2_ZIP = os.environ.get("DOWNLOADED_MOLD2_ZIP_PATH")
 
 
 # If the pre-downloaded asset is not available (e.g., local run), skip these tests.
-@unittest.skipIf(not DOWNLOADED_MOLD2_ZIP,
-                 "Mold2 executable not pre-downloaded; skipping integration tests.")
+@unittest.skipIf(
+    not DOWNLOADED_MOLD2_ZIP,
+    "Mold2 executable not pre-downloaded; skipping integration tests.",
+)
 class TestMold2Integration(unittest.TestCase):
     """
     An integration test suite for the Mold2 wrapper.
@@ -38,7 +37,9 @@ class TestMold2Integration(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.original_zipfile_path = Mold2_pywrapper.Mold2._zipfile
-        self.addCleanup(setattr, Mold2_pywrapper.Mold2, '_zipfile', self.original_zipfile_path)
+        self.addCleanup(
+            setattr, Mold2_pywrapper.Mold2, "_zipfile", self.original_zipfile_path
+        )
 
     def tearDown(self):
         """
@@ -52,7 +53,9 @@ class TestMold2Integration(unittest.TestCase):
         Test the full workflow: instantiation (with download), calculation, and result parsing.
         """
         # 1. Create the directory structure the application expects.
-        patched_path = pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        patched_path = (
+            pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        )
         os.makedirs(patched_path.parent, exist_ok=True)
         # Pre-seed the cache by copying our known-good zip file into place.
         shutil.copy(DOWNLOADED_MOLD2_ZIP, patched_path)
@@ -77,7 +80,9 @@ class TestMold2Integration(unittest.TestCase):
         self.assertEqual(result_df.loc[0, "D026"], 1)  # Number of Oxygens
         self.assertEqual(result_df.loc[0, "D014"], 2)  # Number of rotatable bonds
         # For Benzene (index 1):
-        self.assertEqual(result_df.loc[1, "D001"], 1)  # Number of 6-membered aromatic rings
+        self.assertEqual(
+            result_df.loc[1, "D001"], 1
+        )  # Number of 6-membered aromatic rings
         self.assertEqual(result_df.loc[1, "D024"], 6)  # Number of Carbons
         self.assertEqual(result_df.loc[1, "D017"], 6)  # Number of aromatic bonds
         self.assertEqual(result_df.loc[1, "D014"], 0)  # Number of rotatable bonds
@@ -87,7 +92,9 @@ class TestMold2Integration(unittest.TestCase):
         Test the helper methods for retrieving descriptor information.
         """
         # 1. Create the directory structure the application expects.
-        patched_path = pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        patched_path = (
+            pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        )
         os.makedirs(patched_path.parent, exist_ok=True)
         # Pre-seed the cache by copying our known-good zip file into place.
         shutil.copy(DOWNLOADED_MOLD2_ZIP, patched_path)
@@ -101,7 +108,8 @@ class TestMold2Integration(unittest.TestCase):
         self.assertIsInstance(all_details, dict)
         self.assertEqual(len(all_details), 777)
         self.assertEqual(
-            all_details["D001"], "number of 6-membered aromatic rings (only carbon atoms)"
+            all_details["D001"],
+            "number of 6-membered aromatic rings (only carbon atoms)",
         )
 
     def test_from_executable_installation(self):
@@ -110,7 +118,9 @@ class TestMold2Integration(unittest.TestCase):
         into its own clean environment.
         """
         # 1. Create the directory structure the application expects.
-        patched_path = pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        patched_path = (
+            pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        )
         os.makedirs(patched_path.parent, exist_ok=True)
         Mold2_pywrapper.Mold2._zipfile = str(patched_path)
         self.assertFalse(patched_path.exists())
