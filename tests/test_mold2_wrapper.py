@@ -38,9 +38,13 @@ class TestMold2Integration(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.original_zipfile_path = Mold2_pywrapper.Mold2._zipfile
-        self.addCleanup(setattr, Mold2_pywrapper.Mold2, '_zipfile', self.original_zipfile_path)
+        self.addCleanup(
+            setattr, Mold2_pywrapper.Mold2, "_zipfile", self.original_zipfile_path
+        )
 
-        self.patched_path = pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        self.patched_path = (
+            pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
+        )
         Mold2_pywrapper.Mold2._zipfile = str(self.patched_path)
         os.makedirs(self.patched_path.parent, exist_ok=True)
 
@@ -80,7 +84,7 @@ class TestMold2Integration(unittest.TestCase):
         """
         Test the helper methods for retrieving descriptor information.
         """
-        self.patched_path.touch() # Create dummy file to prevent download
+        self.patched_path.touch()  # Create dummy file to prevent download
         # Test retrieving a single descriptor
         mold2 = Mold2_pywrapper.Mold2(verbose=False)
         detail = mold2.descriptor_detail(15)
@@ -96,7 +100,7 @@ class TestMold2Integration(unittest.TestCase):
 
     def test_parallel_calculation(self):
         """Test the `njobs > 1` parallel processing path."""
-        # Pre-seed the cache by copying our known-good zip file into place.
+        # Pre-seed the cache by copying the known-good zip file into place.
         shutil.copy(DOWNLOADED_MOLD2_ZIP, self.patched_path)
         mold2 = Mold2_pywrapper.Mold2(verbose=False)
         mols = [Chem.MolFromSmiles(s) for s in ["CCO", "c1ccccc1"]]
@@ -129,19 +133,19 @@ class TestMold2Integration(unittest.TestCase):
         Mold2_pywrapper.Mold2.from_executable(DOWNLOADED_MOLD2_ZIP)
         self.assertTrue(self.patched_path.exists())
 
-    @patch('requests.session')
+    @patch("requests.session")
     def test_download_path(self, mock_session):
         """Test that the download logic is called when the zip is missing."""
-        # We don't pre-seed the cache, so os.path.isfile will be false.
+        # Don't pre-seed the cache, so os.path.isfile will be false.
         self.assertFalse(self.patched_path.exists())
         # Configure the mock to simulate a successful download
         mock_get = mock_session.return_value.get
         mock_get.return_value.raise_for_status.return_value = None
         # Provide a real zip file's content to the mock
-        with open(DOWNLOADED_MOLD2_ZIP, 'rb') as f:
+        with open(DOWNLOADED_MOLD2_ZIP, "rb") as f:
             mock_get.return_value.iter_content.return_value = [f.read()]
         # This will now trigger the download block inside __init__
-        mold2 = Mold2_pywrapper.Mold2(verbose=False)
+        mold2 = Mold2_pywrapper.Mold2(verbose=False)  # noqa: F841
         # Assert that the download was attempted and the file was created
         mock_get.assert_called_once()
         self.assertTrue(self.patched_path.exists())

@@ -12,7 +12,7 @@ max-line-length = 110
 # W503: Line break before binary operator
 ignore = E203, W503
 
-# Exclude files and directories that we don't need to check.
+# Exclude files and directories that are not needed to be checked.
 exclude =
     .git
     __pycache__
