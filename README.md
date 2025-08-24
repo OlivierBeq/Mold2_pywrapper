@@ -10,6 +10,7 @@
 [![Code Quality](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/linting.yml/badge.svg)](https://github.com/OlivierBeq/Mold2_pywrapper/actions/workflows/linting.yml)
 [![codecov](https://codecov.io/gh/OlivierBeq/Mold2_pywrapper/graph/badge.svg?token=Q49XHK5FLB)](https://codecov.io/gh/OlivierBeq/Mold2_pywrapper)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![DOI](https://zenodo.org/badge/592541962.svg)](https://doi.org/10.5281/zenodo.16936866)
 <br>
 ![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)
