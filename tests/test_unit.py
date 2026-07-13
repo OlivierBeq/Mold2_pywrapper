@@ -1,268 +1,388 @@
-# -*- coding: utf-8 -*-
-
 import gc
+import json
 import os
-import unittest
-from unittest.mock import MagicMock, patch
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
+from rdkit import Chem
 
 import Mold2_pywrapper
-from Mold2_pywrapper.mold2_wrapper import convert_to_numeric, fix_bond_blocks
+from Mold2_pywrapper.mold2_wrapper import (
+    Mold2,
+    _get_user_agent,
+    convert_to_numeric,
+    fix_bond_blocks,
+    mktempfile,
+)
+
+DATA_DIR = Path(__file__).parent / "data"
 
 
-class TestHelperFunctions(unittest.TestCase):
-    """Unit tests for standalone helper functions."""
+@pytest.fixture
+def mold2_mocked(monkeypatch):
+    """A Mold2 instance with the download step disabled, for logic that doesn't need a real exe."""
+    monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+    return Mold2()
 
-    def test_convert_to_numeric_options(self):
-        """Test all the fill_na options for the convert_to_numeric function."""
-        series = pd.Series(
-            ["1.0", "2.0", None, "3.0", 3.4028199999999998e38], dtype=object
+
+class TestConvertToNumeric:
+    SERIES = ["1.0", "2.0", None, "3.0", 3.4028199999999998e38]
+
+    @pytest.mark.parametrize(
+        "fill_value, expected",
+        [
+            ("mean", 2.0),
+            ("MEAN", 2.0),
+            ("median", 2.0),
+            (-999.0, -999.0),
+            ("nan", np.nan),
+        ],
+    )
+    def test_fill_options(self, fill_value, expected):
+        series = pd.Series(self.SERIES, dtype=object)
+        result = convert_to_numeric(series, fill_value=fill_value)
+        if np.isnan(expected):
+            assert np.isnan(result.iloc[2])
+            assert np.isnan(result.iloc[4])  # the Mold2 "undefined" sentinel is also replaced
+        else:
+            assert result.iloc[2] == pytest.approx(expected)
+            assert result.iloc[4] == pytest.approx(expected)
+
+    def test_no_fill_leaves_nans(self):
+        series = pd.Series(self.SERIES, dtype=object)
+        result = convert_to_numeric(series, fill_value=None)
+        assert np.isnan(result.iloc[2])
+        assert result.iloc[4] == pytest.approx(3.4028199999999998e38)
+
+    def test_numeric_values_preserved(self):
+        series = pd.Series(self.SERIES, dtype=object)
+        result = convert_to_numeric(series, fill_value=None)
+        assert result.iloc[0] == pytest.approx(1.0)
+        assert result.iloc[1] == pytest.approx(2.0)
+        assert result.iloc[3] == pytest.approx(3.0)
+
+
+class TestFixBondBlocks:
+    def test_raises_on_v3000(self, tmp_path):
+        path = tmp_path / "mol.sdf"
+        path.write_text("Mol\n\n\n  0  0  0  0  0  0  0  0  0  0 V3000\n")
+        with pytest.raises(ValueError, match="not a V2000 SD file"):
+            fix_bond_blocks(str(path))
+
+    def test_fixes_bond_lines_on_v2000(self, tmp_path):
+        path = tmp_path / "mol.sdf"
+        # A minimal, RDKit-style V2000 molblock: header (4 lines), 1 atom, 1 bond line
+        # missing the trailing 3 fields RDKit does not write.
+        content = (
+            "\n     RDKit          2D\n\n"
+            "  1  0  0  0  0  0  0  0  0  0999 V2000\n"
+            "    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0\n"
+            "  1  2  1  0\n"
+            "M  END\n"
         )
-        result_mean = convert_to_numeric(series.copy(), fill_value="mean")
-        self.assertAlmostEqual(result_mean.iloc[2], 2.0)
-        result_median = convert_to_numeric(series.copy(), fill_value="median")
-        self.assertAlmostEqual(result_median.iloc[2], 2.0)
-        result_float = convert_to_numeric(series.copy(), fill_value=-999.0)
-        self.assertEqual(result_float.iloc[2], -999.0)
-        result_nan = convert_to_numeric(series.copy(), fill_value="nan")
-        self.assertTrue(np.isnan(result_nan.iloc[2]))
+        path.write_text(content)
+        fix_bond_blocks(str(path))
+        lines = path.read_text().splitlines()
+        assert lines[5] == "  1  2  1  0  0  0  0"
 
-    def test_fix_bond_blocks_v3000_error(self):
-        """Test that fix_bond_blocks correctly raises an error for non-V2000 files."""
-        fake_sdf_content = "Mol\n\n\n  0  0  0  0  0  0  0  0  0  0 V3000\n"
-        with patch(
-            "builtins.open", unittest.mock.mock_open(read_data=fake_sdf_content)
-        ):
-            with self.assertRaisesRegex(ValueError, "not a V2000 SD file"):
-                fix_bond_blocks("dummy_path.sdf")
+    def test_non_bond_lines_untouched(self, tmp_path):
+        path = tmp_path / "mol.sdf"
+        content = "\n     RDKit          2D\n\n  0  0  0  0  0  0  0  0  0  0999 V2000\nM  END\n"
+        path.write_text(content)
+        fix_bond_blocks(str(path))
+        assert path.read_text() == content
 
 
-@patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-class TestMold2Unit(unittest.TestCase):
-    """
-    Unit tests for the Mold2 class methods.
-    All external dependencies (downloads, executables) are mocked.
-    """
+class TestMktempfile:
+    def test_creates_writeable_file_with_suffix(self):
+        path = mktempfile(".sdf")
+        try:
+            assert os.path.isfile(path)
+            assert path.endswith(".sdf")
+            with open(path, "wt") as fh:
+                fh.write("hello")
+        finally:
+            os.remove(path)
 
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_init_error_on_bad_fill_na(self):
-        """Test ValueError for invalid fill_na arguments."""
-        with self.assertRaisesRegex(ValueError, "Can only fill undefined values"):
-            Mold2_pywrapper.Mold2(fill_na="invalid_string")
 
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_descriptor_detail_errors(self):
-        """Test that descriptor_detail raises errors for out-of-bounds indices."""
-        mold2 = Mold2_pywrapper.Mold2()
-        with self.assertRaises(ValueError):
-            mold2.descriptor_detail(0)
-        with self.assertRaises(ValueError):
-            mold2.descriptor_detail(778)
+class TestUserAgent:
+    def test_returns_a_string(self):
+        ua = _get_user_agent()
+        assert isinstance(ua, str)
+        assert "Mozilla" in ua
 
-    @unittest.skipIf(os.name == "nt", "Parallel processing test is skipped on Windows")
-    @patch("Mold2_pywrapper.mold2_wrapper.BoundedProcessPoolExecutor")
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_parallel_calculation_path(self, mock_executor):
-        """Cover the parallel processing block (njobs > 1)."""
-        # Configure the mock to simulate the entire parallel execution flow correctly
-        mock_future = MagicMock()
-        mock_future.result.return_value = (
-            pd.DataFrame()
-        )  # Ensure result() returns a DataFrame
-        mock_executor.return_value.__enter__.return_value.submit.return_value = (
-            mock_future
-        )
+    def test_falls_back_on_error(self, monkeypatch):
+        class BoomUserAgent:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("no data available")
 
-        mold2 = Mold2_pywrapper.Mold2()
-        # The show_banner=False is important to prevent stdout issues in some runners
-        mold2.calculate(mols=[MagicMock()], njobs=2, show_banner=False)
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.UserAgent", BoomUserAgent)
+        ua = _get_user_agent()
+        assert ua == Mold2_pywrapper.mold2_wrapper._FALLBACK_USER_AGENT
 
-        # Assert that our code *attempted* to use the process pool.
-        mock_executor.assert_called_once()
 
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_lazy_loading_of_descriptor_details(self):
-        """Cover the lazy-loading logic for descriptor details."""
-        mold2 = Mold2_pywrapper.Mold2()
-        self.assertFalse(hasattr(mold2, "_details"))
-        mold2.descriptor_details()
-        self.assertTrue(hasattr(mold2, "_details"))
+class TestInit:
+    def test_rejects_bad_fill_na(self, monkeypatch):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        with pytest.raises(ValueError, match="Can only fill undefined values"):
+            Mold2(fill_na="invalid_string")
 
-    @patch("os.path.isdir", return_value=True)
-    @patch("shutil.rmtree")
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_del_method_cleans_up(self, mock_isdir, mock_rmtree):
-        """Cover the __del__ method for directory cleanup."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/temp/dir"
+    @pytest.mark.parametrize("fill_na", ["mean", "MEDIAN", "NaN", 0.0, -1])
+    def test_accepts_valid_fill_na(self, monkeypatch, fill_na):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        mold2 = Mold2(fill_na=fill_na)
+        assert mold2.fill_na == fill_na
+
+    def test_rejects_unsupported_platform(self, monkeypatch):
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.sys.platform", "darwin")
+        with pytest.raises(RuntimeError, match="Windows and Linux platforms"):
+            Mold2()
+
+
+class TestDescriptorDetails:
+    def test_out_of_bounds_indices_raise(self, mold2_mocked):
+        with pytest.raises(ValueError):
+            mold2_mocked.descriptor_detail(0)
+        with pytest.raises(ValueError):
+            mold2_mocked.descriptor_detail(778)
+
+    def test_lazy_loading(self, mold2_mocked):
+        assert not hasattr(mold2_mocked, "_details")
+        mold2_mocked.descriptor_details()
+        assert hasattr(mold2_mocked, "_details")
+
+    def test_lazy_loading_via_descriptor_detail(self, mold2_mocked):
+        assert not hasattr(mold2_mocked, "_details")
+        mold2_mocked.descriptor_detail(1)
+        assert hasattr(mold2_mocked, "_details")
+
+    def test_content_matches_ground_truth(self, mold2_mocked):
+        descriptors_path = DATA_DIR.parent.parent / "src" / "Mold2_pywrapper" / "descriptors.json"
+        ground_truth = json.loads(descriptors_path.read_text())
+        details = mold2_mocked.descriptor_details()
+        assert details == ground_truth
+        assert mold2_mocked.descriptor_detail(1) == ground_truth["D001"]
+        assert mold2_mocked.descriptor_detail(777) == ground_truth["D777"]
+
+
+class TestDel:
+    # NOTE: these tests build their own Mold2 instance instead of using the
+    # `mold2_mocked` fixture: a fixture's return value is kept alive by pytest's
+    # internal bookkeeping until teardown, so `del` inside the test body would
+    # never drop the last reference and __del__ would never fire.
+
+    def test_cleans_up_real_directory(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        mold2 = Mold2()
+        real_dir = tmp_path / "Mold2_instance"
+        real_dir.mkdir()
+        (real_dir / "marker.txt").write_text("x")
+        mold2._dir = str(real_dir)
+        assert real_dir.is_dir()
         del mold2
-        # Force garbage collection to run, which will trigger __del__.
         gc.collect()
-        mock_rmtree.assert_called_once_with("/fake/temp/dir")
+        assert not real_dir.is_dir()
 
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_parse_result_no_header(self):
-        """Cover the logic for parsing a result file with no header."""
-        mold2 = Mold2_pywrapper.Mold2()
-        # Create mock DataFrame with object dtype to avoid FutureWarning
-        mock_df = pd.DataFrame(np.random.rand(2, 777), dtype=object)
-        mock_df.iloc[0, 0] = "This is not D001"
-        with patch("pandas.read_table", return_value=mock_df):
-            result = mold2._parse_result("dummy_path.txt")
-            self.assertEqual(result.columns[0], "D001")
-
-    @patch("Mold2_pywrapper.mold2_wrapper.platform", "linux")
-    @patch("Mold2_pywrapper.mold2_wrapper.architecture", return_value=("32bit",))
-    @patch("Mold2_pywrapper.mold2_wrapper.Mold2._download_executables", MagicMock())
-    def test_prepare_command_on_linux32(self, mock_arch):
-        """Cover the command preparation logic for 32-bit Linux."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"
-        with patch("os.path.isdir", return_value=True), patch(
-            "os.path.isfile", return_value=True
-        ):
-            command = mold2._prepare_command("input.sdf", "output.txt")
-            self.assertIn("Linux_x86-32", command)
-
-    @patch("Mold2_pywrapper.mold2_wrapper.platform", "linux")
-    @patch("os.chmod")
-    def test_extract_executables_on_linux(self, mock_chmod):
-        """Cover the os.chmod calls made on Linux during extraction."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"
-        with patch("zipfile.ZipFile"), patch("os.rename"):
-            mold2._extract_executables("dummy.zip")
-            self.assertGreater(mock_chmod.call_count, 0)
-
-    def test_show_banner_path(self):
-        """Cover the `show_banner=True` path and the print statement within it."""
-        mold2 = Mold2_pywrapper.Mold2()
-        # We now mock `print` and let the REAL `_show_banner` be called.
-        with patch("builtins.print") as mock_print, patch.object(
-            mold2, "_calculate", return_value=pd.DataFrame()
-        ):
-            mold2.calculate(mols=[], show_banner=True)
-            # Assert that the print function was called, which proves _show_banner ran.
-            mock_print.assert_called_once()
-
-    def test_del_method_no_dir(self):
-        """Cover the __del__ path where _dir was never created."""
-        mold2 = Mold2_pywrapper.Mold2()
-        # The _dir attribute is not set, so __del__ should do nothing.
-        # This test passes if no error is raised during garbage collection.
+    def test_noop_without_dir(self, monkeypatch):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        mold2 = Mold2()
+        # _dir was never set; __del__ should do nothing and raise nothing.
         del mold2
         gc.collect()
 
-    def test_descriptor_detail_lazy_loading(self):
-        """Cover the lazy-loading path specifically for descriptor_detail."""
-        mold2 = Mold2_pywrapper.Mold2()
-        self.assertFalse(hasattr(mold2, "_details"))
-        # Calling descriptor_detail should trigger the lazy load.
-        detail = mold2.descriptor_detail(1)
-        self.assertTrue(hasattr(mold2, "_details"))
-        self.assertIsNotNone(detail)
+    def test_survives_removal_error(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        mold2 = Mold2()
+        real_dir = tmp_path / "Mold2_instance"
+        real_dir.mkdir()
+        mold2._dir = str(real_dir)
 
-    @patch("shutil.copy")
-    def test_from_executable_return_value(self, mock_copy):
-        """Cover the return statement of the from_executable static method."""
-        # We patch shutil.copy because we only care about the return value here.
-        result = Mold2_pywrapper.Mold2.from_executable("dummy_path.zip")
-        self.assertIsInstance(result, Mold2_pywrapper.Mold2)
+        def boom(path):
+            raise OSError("locked")
 
-    @patch("Mold2_pywrapper.mold2_wrapper.platform", "win32")
-    def test_prepare_command_on_windows(self):
-        """Cover the command preparation logic for Windows."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"
-        with patch("os.path.isdir", return_value=True), patch(
-            "os.path.isfile", return_value=True
-        ):
-            command = mold2._prepare_command("input.sdf", "output.txt")
-            self.assertIn("Mold2.exe", command)
-            self.assertIn("echo.", command)
-
-    def test_prepare_command_bad_paths(self):
-        """Cover the error handling for non-existent paths."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"
-        # Test case where mold2_folder does not exist
-        with patch("os.path.isdir", return_value=False):
-            with self.assertRaises(RuntimeError):
-                mold2._prepare_command("input.sdf", "output.txt")
-        # Test case where input_path does not exist
-        with patch("os.path.isdir", return_value=True), patch(
-            "os.path.isfile", return_value=False
-        ):
-            with self.assertRaises(ValueError):
-                mold2._prepare_command("input.sdf", "output.txt")
-
-    @patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin")
-    def test_init_error_on_bad_platform(self):
-        """Cover the RuntimeError for unsupported platforms in __init__."""
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mold2 descriptors can only be calculated on Windows and Linux platforms",
-        ):
-            Mold2_pywrapper.Mold2()
-
-    @patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin")
-    def test_prepare_command_error_on_bad_platform(self):
-        """Cover the RuntimeError for unsupported platforms in _prepare_command."""
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Mold2 descriptors can only be calculated on Windows and Linux platforms",
-        ):
-            mold2 = Mold2_pywrapper.Mold2()
-            mold2._dir = "/fake/dir"
-            with patch("os.path.isdir", return_value=True), patch(
-                "os.path.isfile", return_value=True
-            ):
-                mold2._prepare_command("input.sdf", "output.txt")
-
-    def test_prepare_command_bad_output_path(self):
-        """Cover the ValueError for a non-existent output directory."""
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"
-        # Simulate os.path.isdir returning False for the output directory
-        with patch("os.path.isdir", side_effect=[True, False]), patch(
-            "os.path.isfile", return_value=True
-        ):
-            with self.assertRaisesRegex(
-                ValueError, "Path to output file does not exist"
-            ):
-                mold2._prepare_command("input.sdf", "/bad/path/output.txt")
-
-    def test_prepare_command_raises_on_unsupported_platform(self):
-        """Cover the RuntimeError in _prepare_command for unsupported platforms."""
-        # 1. Instantiate the class normally. This succeeds because the platform is not yet patched.
-        mold2 = Mold2_pywrapper.Mold2()
-        mold2._dir = "/fake/dir"  # Set required attribute
-
-        # 2. Now, patch the platform to 'darwin' ONLY for the code inside this block.
-        with patch("Mold2_pywrapper.mold2_wrapper.platform", "darwin"):
-            # 3. Assert that calling the method *inside the patched environment* raises the error.
-            with self.assertRaisesRegex(RuntimeError, "Platform .* not supported"):
-                # We also need to mock the os checks to get past them to the platform logic.
-                with patch("os.path.isdir", return_value=True), patch(
-                    "os.path.isfile", return_value=True
-                ):
-                    mold2._prepare_command("input.sdf", "output.txt")
+        monkeypatch.setattr("shutil.rmtree", boom)
+        del mold2
+        gc.collect()  # must not raise
 
 
-class TestMold2Download(unittest.TestCase):
-    """A dedicated test case for the download logic."""
+class TestPrepareCommand:
+    def test_missing_mold2_folder_raises(self, mold2_mocked, tmp_path):
+        mold2_mocked._dir = str(tmp_path)
+        with pytest.raises(RuntimeError, match="Could not locate Mold2 executables"):
+            mold2_mocked._prepare_command("input.sdf", "output.txt")
 
-    @patch("requests.session")
-    def test_download_path(self, mock_session):
-        """Test that the download logic is called when the zip is missing."""
-        mock_get = mock_session.return_value.get
-        mock_get.return_value.raise_for_status.return_value = None
-        mock_get.return_value.iter_content.return_value = [b"fake zip content"]
+    def test_missing_input_file_raises(self, mold2_mocked, tmp_path):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        with pytest.raises(ValueError, match="Input file does not exist"):
+            mold2_mocked._prepare_command("nope.sdf", "output.txt")
 
-        with patch("os.path.isfile", return_value=False):
-            # We must also patch the final `open` call to prevent a FileNotFoundError
-            with patch("builtins.open", unittest.mock.mock_open()):
-                Mold2_pywrapper.Mold2(verbose=True)
-                mock_get.assert_called_once()
+    def test_missing_output_dir_raises(self, mold2_mocked, tmp_path):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        input_file = tmp_path / "input.sdf"
+        input_file.write_text("x")
+        with pytest.raises(ValueError, match="Path to output file does not exist"):
+            mold2_mocked._prepare_command(str(input_file), "/no/such/dir/output.txt")
+
+    def test_windows_command(self, mold2_mocked, tmp_path, monkeypatch):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        input_file = tmp_path / "input.sdf"
+        input_file.write_text("x")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.sys.platform", "win32")
+        command = mold2_mocked._prepare_command(str(input_file), str(tmp_path / "output.txt"))
+        assert command[0].endswith("Mold2.exe")
+        assert command[-1] == "NUL"
+
+    def test_linux64_command(self, mold2_mocked, tmp_path, monkeypatch):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        input_file = tmp_path / "input.sdf"
+        input_file.write_text("x")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.sys.platform", "linux")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.architecture", lambda: ("64bit", ""))
+        command = mold2_mocked._prepare_command(str(input_file), str(tmp_path / "output.txt"))
+        assert "Linux_x86-64" in command[0]
+        assert command[-1] == "/dev/null"
+
+    def test_linux32_command(self, mold2_mocked, tmp_path, monkeypatch):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        input_file = tmp_path / "input.sdf"
+        input_file.write_text("x")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.sys.platform", "linux")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.architecture", lambda: ("32bit", ""))
+        command = mold2_mocked._prepare_command(str(input_file), str(tmp_path / "output.txt"))
+        assert "Linux_x86-32" in command[0]
+
+    def test_unsupported_platform_raises(self, mold2_mocked, tmp_path, monkeypatch):
+        mold2_mocked._dir = str(tmp_path)
+        os.makedirs(tmp_path / "extras")
+        input_file = tmp_path / "input.sdf"
+        input_file.write_text("x")
+        monkeypatch.setattr("Mold2_pywrapper.mold2_wrapper.sys.platform", "darwin")
+        with pytest.raises(RuntimeError, match="not supported"):
+            mold2_mocked._prepare_command(str(input_file), str(tmp_path / "output.txt"))
+
+
+class TestRunCommand:
+    def test_raises_on_nonzero_exit(self, mold2_mocked):
+        with pytest.raises(Exception):
+            mold2_mocked._run_command(["python3", "-c", "import sys; sys.exit(1)"])
+
+    def test_succeeds_on_zero_exit(self, mold2_mocked):
+        mold2_mocked._run_command(["python3", "-c", "pass"])
+
+
+class TestParseResult:
+    def test_header_present(self, mold2_mocked, tmp_path):
+        path = tmp_path / "out.txt"
+        header = "\t".join(["Name"] + [f"D{i:03d}" for i in range(1, 778)])
+        row = "\t".join(["mol1"] + ["1.0"] * 777)
+        path.write_text(header + "\n" + row + "\n")
+        result = mold2_mocked._parse_result(str(path))
+        assert list(result.columns[:3]) == ["D001", "D002", "D003"]
+        assert len(result) == 1
+
+    def test_header_absent(self, mold2_mocked, tmp_path):
+        path = tmp_path / "out.txt"
+        row = "\t".join(["mol1"] + ["1.0"] * 777)
+        path.write_text(row + "\n")
+        result = mold2_mocked._parse_result(str(path))
+        assert list(result.columns[:3]) == ["D001", "D002", "D003"]
+        assert len(result) == 1
+
+
+class TestPrepareInput:
+    def test_writes_v2000_sdf(self, mold2_mocked):
+        mols = [Chem.MolFromSmiles("CCO"), Chem.MolFromSmiles("c1ccccc1")]
+        path = mold2_mocked._prepare_input(mols)
+        try:
+            content = Path(path).read_text()
+            assert "V2000" in content
+            assert content.count("$$$$") == 2
+        finally:
+            os.remove(path)
+
+
+class TestDownloadExecutables:
+    def test_skips_when_already_downloaded(self, tmp_path, monkeypatch):
+        # Bypass __init__ and the mold2_mocked fixture entirely: the fixture's own
+        # monkeypatch of _download_executables to a no-op would otherwise shadow the
+        # real method this test needs to exercise, and would make the assertion below
+        # pass vacuously regardless of whether the skip logic actually works. Building
+        # the instance directly also guarantees the real default cache is never touched.
+        mold2 = Mold2.__new__(Mold2)
+        existing = tmp_path / "Mold2-Executable-File.zip"
+        existing.write_bytes(b"already here")
+        monkeypatch.setattr(Mold2, "_zipfile_path", staticmethod(lambda: str(existing)))
+        called = []
+        monkeypatch.setattr("requests.session", lambda: called.append(True))
+        mold2._download_executables(verbose=False)
+        assert not called
+
+    def test_downloads_when_missing(self, tmp_path, monkeypatch):
+        # Bypass __init__ (and its own call to _download_executables) entirely: this
+        # test targets the real _download_executables implementation directly.
+        mold2 = Mold2.__new__(Mold2)
+        target = tmp_path / "sub" / "Mold2-Executable-File.zip"
+        monkeypatch.setattr(Mold2, "_zipfile_path", staticmethod(lambda: str(target)))
+
+        class FakeResponse:
+            def raise_for_status(self):
+                pass
+
+            def iter_content(self, chunk_size):
+                return [b"fake", b"zip", b"content"]
+
+        class FakeSession:
+            def get(self, *args, **kwargs):
+                return FakeResponse()
+
+        monkeypatch.setattr("requests.session", FakeSession)
+        mold2._download_executables(verbose=True)
+        assert target.is_file()
+        assert target.read_bytes() == b"fakezipcontent"
+
+
+class TestZipfilePath:
+    def test_real_default_path(self, tmp_path, monkeypatch):
+        # Redirect pystow's home dir so this never touches (or creates) the real
+        # default cache directory, and can never see a real cached executable.
+        monkeypatch.setenv("PYSTOW_HOME", str(tmp_path))
+        path = Mold2._zipfile_path()
+        assert path.endswith("Mold2-Executable-File.zip")
+        assert "Mold2" in path
+        assert path.startswith(str(tmp_path))
+
+
+class TestShowBanner:
+    def test_prints_citation_notice(self, mold2_mocked, monkeypatch, capsys):
+        mold2_mocked._show_banner()
+        captured = capsys.readouterr()
+        assert "Mold2" in captured.out
+        assert "DOI: 10.1021/ci800038f" in captured.out
+
+    def test_calculate_shows_banner_by_default(self, mold2_mocked, monkeypatch, capsys):
+        monkeypatch.setattr(mold2_mocked, "_calculate", lambda mols: pd.DataFrame())
+        mold2_mocked.calculate(mols=[], show_banner=True)
+        captured = capsys.readouterr()
+        assert "Mold2" in captured.out
+
+
+class TestFromExecutable:
+    def test_copies_zip_to_default_location(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Mold2, "_download_executables", lambda self, verbose=True: None)
+        source = tmp_path / "source.zip"
+        source.write_bytes(b"zip-bytes")
+        destination = tmp_path / "nested" / "Mold2-Executable-File.zip"
+        monkeypatch.setattr(Mold2, "_zipfile_path", staticmethod(lambda: str(destination)))
+
+        result = Mold2.from_executable(str(source))
+
+        assert isinstance(result, Mold2)
+        assert destination.is_file()
+        assert destination.read_bytes() == b"zip-bytes"

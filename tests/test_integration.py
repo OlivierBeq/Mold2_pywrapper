@@ -1,63 +1,79 @@
-# tests/test_integration.py
-
+import gc
 import os
-import pathlib
 import shutil
 import tempfile
-import unittest
 
+import pytest
 from rdkit import Chem
 
-import Mold2_pywrapper
+from Mold2_pywrapper.mold2_wrapper import Mold2
 
-# This environment variable is set by the CI workflow
-DOWNLOADED_MOLD2_ZIP = os.environ.get("DOWNLOADED_MOLD2_ZIP_PATH")
+pytestmark = pytest.mark.integration
 
 
-@unittest.skipIf(
-    not DOWNLOADED_MOLD2_ZIP,
-    "Mold2 executable not pre-downloaded; skipping integration tests.",
-)
-class TestMold2Integration(unittest.TestCase):
-    """
-    An integration test suite that uses a real, pre-downloaded executable
-    to test the end-to-end workflow.
-    """
-
-    def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temp_dir.cleanup)
-        self.original_zipfile_path = Mold2_pywrapper.Mold2._zipfile
-        self.addCleanup(
-            setattr, Mold2_pywrapper.Mold2, "_zipfile", self.original_zipfile_path
-        )
-        self.patched_path = (
-            pathlib.Path(self.temp_dir.name) / "Mold2" / "Mold2-Executable-File.zip"
-        )
-        Mold2_pywrapper.Mold2._zipfile = str(self.patched_path)
-        os.makedirs(self.patched_path.parent, exist_ok=True)
-
-    def test_end_to_end_calculation(self):
-        """Test the main calculation workflow with njobs=1."""
-        shutil.copy(DOWNLOADED_MOLD2_ZIP, self.patched_path)
-        mold2 = Mold2_pywrapper.Mold2(verbose=False)
+class TestEndToEnd:
+    def test_known_molecules(self, mold2_real):
         mols = [Chem.MolFromSmiles(s) for s in ["CCO", "c1ccccc1"]]
-        result_df = mold2.calculate(mols, show_banner=False, njobs=1)
-        self.assertEqual(result_df.shape, (2, 777))
-        self.assertEqual(result_df.loc[0, "D024"], 2)
+        result = mold2_real.calculate(mols, show_banner=False, njobs=1)
+        assert result.shape == (2, 777)
+        assert result.loc[0, "D024"] == 2
 
-    @unittest.skipIf(os.name == "nt", "Parallel processing test is skipped on Windows")
-    def test_parallel_calculation(self):
-        """Test the parallel processing path with njobs > 1."""
-        shutil.copy(DOWNLOADED_MOLD2_ZIP, self.patched_path)
-        mold2 = Mold2_pywrapper.Mold2(verbose=False)
-        mols = [Chem.MolFromSmiles(s) for s in ["CCO", "c1ccccc1"]]
-        result_df = mold2.calculate(mols, show_banner=False, njobs=2)
-        self.assertEqual(result_df.shape, (2, 777))
-        self.assertEqual(result_df.loc[0, "D024"], 2)
+    def test_small_batch(self, mold2_real, small_mols):
+        result = mold2_real.calculate(small_mols, show_banner=False, njobs=1)
+        assert result.shape == (len(small_mols), 777)
+        assert list(result.columns[:2]) == ["D001", "D002"]
+        # Values should be numeric (not left as raw strings)
+        assert result.select_dtypes(include="number").shape[1] == 777
 
-    def test_from_executable_installation(self):
-        """Test installation from a user-provided zip."""
-        self.assertFalse(self.patched_path.exists())
-        Mold2_pywrapper.Mold2.from_executable(DOWNLOADED_MOLD2_ZIP)
-        self.assertTrue(self.patched_path.exists())
+    def test_fill_na_options(self, isolated_zipfile_path, real_mold2_zip, small_mols):
+        os.makedirs(os.path.dirname(isolated_zipfile_path), exist_ok=True)
+        shutil.copy(real_mold2_zip, isolated_zipfile_path)
+        mold2 = Mold2(fill_na="mean", verbose=False)
+        result = mold2.calculate(small_mols, show_banner=False, njobs=1)
+        assert not result.isna().any().any()
+
+    def test_parallel_matches_sequential(self, mold2_real, small_mols):
+        sequential = mold2_real.calculate(small_mols, show_banner=False, njobs=1)
+        parallel = mold2_real.calculate(small_mols, show_banner=False, njobs=2, chunksize=5)
+        assert sequential.shape == parallel.shape
+        assert list(sequential.columns) == list(parallel.columns)
+
+    def test_larger_sample(self, mold2_real, sample_mols):
+        subset = sample_mols[:100]
+        result = mold2_real.calculate(subset, show_banner=False, njobs=2, chunksize=25)
+        assert result.shape == (len(subset), 777)
+
+    def test_del_cleans_up_real_temp_dir(self, isolated_zipfile_path, real_mold2_zip, small_mols):
+        # Built locally rather than via the `mold2_real` fixture: a fixture's return
+        # value is kept alive by pytest's internal bookkeeping until teardown, so
+        # `del` inside the test body would never drop the last reference.
+        os.makedirs(os.path.dirname(isolated_zipfile_path), exist_ok=True)
+        shutil.copy(real_mold2_zip, isolated_zipfile_path)
+        mold2 = Mold2(verbose=False)
+        mold2.calculate(small_mols, show_banner=False, njobs=1)
+        real_dir = mold2._dir
+        assert os.path.isdir(real_dir)
+        del mold2
+        gc.collect()
+        assert not os.path.isdir(real_dir)
+
+
+class TestFromExecutable:
+    def test_install_and_use(self, isolated_zipfile_path, real_mold2_zip, small_mols):
+        assert not os.path.isfile(isolated_zipfile_path)
+        mold2 = Mold2.from_executable(real_mold2_zip)
+        assert os.path.isfile(isolated_zipfile_path)
+        result = mold2.calculate(small_mols[:5], show_banner=False, njobs=1)
+        assert result.shape == (5, 777)
+
+
+class TestExtractExecutables:
+    def test_real_extraction_renames_and_permissions(self, mold2_real):
+        mold2_real._dir = tempfile.mkdtemp(prefix="Mold2_test_")
+        mold2_real._extract_executables(mold2_real._zipfile_path())
+        base = os.path.join(mold2_real._dir, "extras", "Mold2")
+        assert os.path.isfile(os.path.join(base, "Windows", "Mold2.exe"))
+        assert os.path.isfile(os.path.join(base, "Windows", "Mold2.bat"))
+        assert os.path.isfile(os.path.join(base, "Linux_x86-64", "Mold2"))
+        mode = os.stat(os.path.join(base, "Linux_x86-64", "Mold2")).st_mode
+        assert mode & 0o100  # executable by owner
