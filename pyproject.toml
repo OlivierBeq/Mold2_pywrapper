@@ -1,0 +1,83 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Mold2_pywrapper"
+dynamic = ["version"]
+description = "Python wrapper for Mold2 descriptors"
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [
+    { name = "Olivier J. M. Béquignon", email = "olivier.bequignon.maintainer@gmail.com" },
+]
+maintainers = [
+    { name = "Olivier J. M. Béquignon", email = "olivier.bequignon.maintainer@gmail.com" },
+]
+keywords = [
+    "mold2",
+    "molecular descriptors",
+    "cheminformatics",
+    "toxicoinformatics",
+    "QSAR",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = [
+    "more-itertools",
+    "pandas",
+    "rdkit",
+    "requests",
+    "pystow",
+    "numpy>=2.0.0",
+    "fake-useragent",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov", "pytest-mock"]
+
+[project.urls]
+Homepage = "https://github.com/OlivierBeq/Mold2_pywrapper"
+
+[tool.setuptools.dynamic]
+version = { attr = "Mold2_pywrapper.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["tests/data"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.black]
+line-length = 110
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires a real Mold2 executable to run",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["Mold2_pywrapper"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+]
