@@ -10,49 +10,49 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
-import zipfile
+from collections.abc import Iterable
+from concurrent.futures import ProcessPoolExecutor
+from importlib import resources
 from platform import architecture
-from sys import platform
-from typing import Iterable, List, Optional, Union
+from threading import BoundedSemaphore
+from zipfile import ZipFile
 
 import more_itertools
 import numpy as np
 import pandas as pd
 import pystow
 import requests
-from bounded_pool_executor import BoundedProcessPoolExecutor
+from fake_useragent import UserAgent
 from rdkit import Chem
 from rdkit.Chem import AllChem
+
+# Hardcoded fallback used only if fake-useragent's bundled data cannot be read.
+_FALLBACK_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+)
+
+# Mold2's "undefined value" sentinel.
+_MOLD2_UNDEFINED_VALUE = 3.4028199999999998e38
 
 
 class Mold2:
     """Mold2 wrapper to obtain molecular descriptors."""
 
-    @property
-    def _zipfile(self) -> str:
-        # Default folder for Mold2 executables
-        _zipfile = os.path.abspath(
-            os.path.join(pystow.join("Mold2").as_posix(), "Mold2-Executable-File.zip")
-        )
-        return _zipfile
-
-    def __init__(self, fill_na: Union[str, float] = None, verbose: bool = True):
+    def __init__(self, fill_na: float | str | None = None, verbose: bool = True):
         """Instantiate a wrapper to calculate Mold2 molecular descriptors.
 
         :param fill_na: value to fill undefined values by; may be a number or one of {'median', 'mean', 'NaN'}
         :param verbose: Should details about the download of executables be printed out
         """
-        if platform not in ["win32", "linux"]:
-            raise RuntimeError(
-                "Mold2 descriptors can only be calculated on Windows and Linux platforms."
-            )
+        if sys.platform not in ("win32", "linux"):
+            raise RuntimeError("Mold2 descriptors can only be calculated on Windows and Linux platforms.")
         if fill_na is not None and (
-            not np.isreal(fill_na) and fill_na.lower() not in ["median", "mean", "nan"]
+            not np.isreal(fill_na) and fill_na.lower() not in ("median", "mean", "nan")
         ):
-            raise ValueError(
-                "Can only fill undefined values by a float or one of {'median', 'mean', 'nan'}"
-            )
+            raise ValueError("Can only fill undefined values by a float or one of {'median', 'mean', 'nan'}")
         self.fill_na = fill_na
         # Ensure executables are available
         self._download_executables(verbose)
@@ -60,16 +60,19 @@ class Mold2:
     def __del__(self):
         """Remove downloaded executables."""
         if hasattr(self, "_dir") and os.path.isdir(self._dir):
-            shutil.rmtree(self._dir)
+            try:
+                shutil.rmtree(self._dir)
+            except OSError:
+                pass
 
     def calculate(
         self,
         mols: Iterable[Chem.Mol],
         show_banner: bool = True,
         njobs: int = 1,
-        chunksize: Optional[int] = 1000,
+        chunksize: int | None = 1000,
     ) -> pd.DataFrame:
-        """Caclulate Mold2 descriptors.
+        """Calculate Mold2 descriptors.
 
         :param mols: RDkit molecules for which Mold2 descriptors should be calculated
         :param show_banner: If True, show notice on Mold2 descriptors usage
@@ -81,14 +84,20 @@ class Mold2:
             self._show_banner()
         # Parallelize should need be
         if njobs > 1:
-            with BoundedProcessPoolExecutor(max_workers=njobs) as worker:
-                futures = [
-                    worker.submit(self._calculate, list(chunk))
-                    for chunk in more_itertools.batched(mols, chunksize)
-                ]
-            return pd.concat([future.result() for future in futures]).reset_index(
-                drop=True
-            )
+            results = []
+            # A bounded semaphore ensures at most `njobs` chunks are ever queued/pickled
+            # to workers at once, so `mols` (which may hold millions of molecules) is
+            # only consumed from as fast as workers can keep up.
+            semaphore = BoundedSemaphore(njobs)
+            with ProcessPoolExecutor(max_workers=njobs) as worker:
+                futures = []
+                for chunk in more_itertools.batched(mols, chunksize):
+                    semaphore.acquire()
+                    future = worker.submit(self._calculate, list(chunk))
+                    future.add_done_callback(lambda _f: semaphore.release())
+                    futures.append(future)
+                results = [future.result() for future in futures]
+            return pd.concat(results).reset_index(drop=True)
         # Single process
         return self._calculate(list(mols))
 
@@ -119,13 +128,19 @@ class Mold2:
         :param zipfile_path: Path to the zip file containing Mold2 binaries
         :return: a Mold2 calculator object
         """
-        shutil.copy(zipfile_path, Mold2._zipfile)
+        destination = Mold2._zipfile_path()
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        shutil.copy(zipfile_path, destination)
         return Mold2()
+
+    @staticmethod
+    def _zipfile_path() -> str:
+        """Path to the (possibly not yet downloaded) Mold2 executables ZIP archive."""
+        return os.path.abspath(os.path.join(pystow.join("Mold2").as_posix(), "Mold2-Executable-File.zip"))
 
     def _show_banner(self):
         """Print info message for citing."""
-        print(
-            """Mold2 calculates a large and diverse set of molecular descriptors encoding two-
+        print("""Mold2 calculates a large and diverse set of molecular descriptors encoding two-
 dimensional chemical structure information. Comparative analysis of Mold2 descriptors
 with those calculated from commercial software on several published datasets
 demonstrated that Mold2 descriptors convey sufficient structural information. In addition,
@@ -152,44 +167,36 @@ DOI: 10.1021/ci800038f
 
 ###################################
 
-"""
-        )
+""")
 
     def _parse_details(self):
         """Parse descriptor details."""
-        with open(
-            os.path.abspath(os.path.join(__file__, os.pardir, "descriptors.json"))
-        ) as jfile:
-            self._details = json.load(jfile)
+        data = resources.files(__package__).joinpath("descriptors.json").read_text()
+        self._details = json.loads(data)
 
     def _download_executables(self, verbose: bool = True) -> None:
         """Download executables from the FDA website.
 
         :param verbose: Should details about the download of executables be printed out
         """
-        if not os.path.isfile(self._zipfile):
+        zipfile_path = self._zipfile_path()
+        if not os.path.isfile(zipfile_path):
             if verbose:
                 # Display information
                 print(
                     "The executables will be installed and are being downloaded from\n"
                     "https://www.fda.gov/science-research/bioinformatics-tools/mold2"
                 )
+            os.makedirs(os.path.dirname(zipfile_path), exist_ok=True)
             # Download Mold2
             session = requests.session()
             res = session.get(
                 "https://www.fda.gov/files/science%20&%20research/published/Mold2-Executable-File.zip",
                 headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/128.0.0.0 "
-                    "Safari/537.36",
-                    "cache-control": "public, max-age=27440",
-                    "content-type": "text/html; charset=UTF-8",
-                    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                    "User-Agent": _get_user_agent(),
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
                     "image/avif,image/webp,image/apng,*/*;q=0.8,"
                     "application/signed-exchange;v=b3;q=0.7",
-                    "accept-encoding": "gzip, deflate, br, zstd",
-                    "accept-language": "en-US;q=0.9,en;q=0.8",
                 },
                 stream=True,
                 verify=True,
@@ -197,7 +204,7 @@ DOI: 10.1021/ci800038f
             # Raise an exception if needed
             res.raise_for_status()
             # Save ZIP file
-            with open(self._zipfile, "wb") as fh:
+            with open(zipfile_path, "wb") as fh:
                 for chunk in res.iter_content(chunk_size=1024):
                     fh.write(chunk)
             if verbose:
@@ -211,7 +218,7 @@ DOI: 10.1021/ci800038f
         """
         mold2_folder = os.path.abspath(os.path.join(self._dir, "extras"))
         # Extract Zip file
-        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+        with ZipFile(zip_path, "r") as zip_ref:
             zip_ref.extractall(mold2_folder)
         # Rename files
         os.rename(
@@ -223,7 +230,7 @@ DOI: 10.1021/ci800038f
             os.path.join(mold2_folder, "Mold2", "Windows", "Mold2.bat"),
         )
         # Make files executable
-        if platform in ("linux", "darwin"):
+        if sys.platform in ("linux", "darwin"):
             os.chmod(
                 os.path.join(mold2_folder, "Mold2", "Windows", "Mold2.exe"),
                 stat.S_IXUSR,
@@ -237,7 +244,7 @@ DOI: 10.1021/ci800038f
                 stat.S_IXUSR,
             )
 
-    def _prepare_input(self, mols: List[Chem.Mol]) -> str:
+    def _prepare_input(self, mols: list[Chem.Mol]) -> str:
         """Create temporary V2000 SD input file.
 
         :param mols: Molecules to obtain Mold2 descriptors of.
@@ -253,23 +260,19 @@ DOI: 10.1021/ci800038f
         fix_bond_blocks(sdf)
         return sdf
 
-    def _prepare_command(
-        self, input_path: str, output_path: str, log: Optional[str] = None
-    ) -> str:
-        """Obtain command to run to calculate molecular descriptors.
+    def _prepare_command(self, input_path: str, output_path: str, log: str | None = None) -> list[str]:
+        """Obtain the command to run to calculate molecular descriptors.
 
         :param input_path: Path to V2000 SD input file containing molecules
         to calculate Mold2 descriptors from.
         :param output_path: Path to output file
         :param log: If not None, path to the log file tobe created
-        :return: Internal command to be run to obtain descriptors
+        :return: Command, as an argument list, to be run to obtain descriptors
         """
         mold2_folder = os.path.abspath(os.path.join(self._dir, "extras"))
         # Exceptions to ensure execution security of subprocess
         if not os.path.isdir(mold2_folder):
-            raise RuntimeError(
-                "Could not locate Mold2 executables. Were they downloaded first?"
-            )
+            raise RuntimeError("Could not locate Mold2 executables. Were they downloaded first?")
         if not os.path.isfile(input_path):
             raise ValueError(f"Input file does not exist: {input_path}")
         if not os.path.isdir(os.path.abspath(os.path.join(output_path, os.pardir))):
@@ -278,35 +281,34 @@ DOI: 10.1021/ci800038f
                                                                                       os.pardir))}"""
             )
         # Determine components for the command
-        if platform.startswith("win32"):
+        if sys.platform == "win32":
             exec_path = os.path.join(mold2_folder, "Mold2", "Windows", "Mold2.exe")
             log_file = log if log is not None else "NUL"
-            echo_cmd = "echo."
-        elif platform.startswith("linux"):
+        elif sys.platform == "linux":
             log_file = log if log is not None else "/dev/null"
-            echo_cmd = r'echo -e "\n"'
             if architecture()[0].startswith("32"):
                 exec_path = os.path.join(mold2_folder, "Mold2", "Linux_x86-32", "Mold2")
             else:
                 exec_path = os.path.join(mold2_folder, "Mold2", "Linux_x86-64", "Mold2")
         else:
-            raise RuntimeError(f"Platform ({platform}) not supported.")
+            raise RuntimeError(f"Platform ({sys.platform}) not supported.")
         # Create command
-        command = (
-            f"{echo_cmd} | {exec_path} -i {input_path} -o {output_path} -r {log_file}"
-        )
-        return command
+        return [exec_path, "-i", input_path, "-o", output_path, "-r", log_file]
 
-    def _run_command(self, command: str) -> None:
+    def _run_command(self, command: list[str]) -> None:
         """Run the internal command to obtain molecular descriptors.
 
-        :param command: Internal command to be run.
+        :param command: Internal command, as an argument list, to be run.
         """
-        # Run calculation
-        with open(os.devnull, "wb") as devnull:
-            _ = subprocess.check_output(
-                command, shell=True, stderr=devnull
-            )  # noqa: S602
+        # Mold2 prompts for input; feeding it a newline on stdin auto-answers it.
+        # No shell is involved, so there is no shell-injection surface.
+        subprocess.run(
+            command,
+            input=b"\n",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+        )
 
     def _parse_result(self, output_path: str) -> pd.DataFrame:
         """Read a Mold2 output file and convert to a DataFrame.
@@ -315,9 +317,7 @@ DOI: 10.1021/ci800038f
         :return: a pandas DataFrame containing all Mold2 desciptor values
         """
         # Read results
-        data = pd.read_table(
-            output_path, header=None, usecols=range(1, 778), low_memory=False
-        )
+        data = pd.read_table(output_path, header=None, usecols=range(1, 778), low_memory=False)
         if data.iloc[0, 0] != "D001":
             # Header is not provided if first molecule failed
             data.columns = [f"D{x:03d}" for x in range(1, 778)]
@@ -327,8 +327,8 @@ DOI: 10.1021/ci800038f
         data.reset_index(drop=True, inplace=True)
         return data
 
-    def _calculate(self, mols: List[Chem.Mol]) -> pd.DataFrame:
-        """Caclulate Mold2 descriptors on one process.
+    def _calculate(self, mols: list[Chem.Mol]) -> pd.DataFrame:
+        """Calculate Mold2 descriptors on one process.
 
         :param mols: RDkit molecules for which Mold2 descriptors should be calculated
         :return: a pandas DataFrame containing all Mold2 desciptor values
@@ -338,12 +338,10 @@ DOI: 10.1021/ci800038f
             self._dir = tempfile.mkdtemp(prefix="Mold2_")
         if not os.path.isdir(os.path.join(self._dir, "extras")):
             # Extract executables
-            self._extract_executables(self._zipfile)
+            self._extract_executables(self._zipfile_path())
         input_path = self._prepare_input(mols)
         output = mktempfile(".txt")
-        mold2_command = self._prepare_command(
-            input_path=input_path, output_path=output, log=None
-        )
+        mold2_command = self._prepare_command(input_path=input_path, output_path=output, log=None)
         self._run_command(mold2_command)
         data = self._parse_result(output_path=output)
         data = data.apply(convert_to_numeric, axis=0, args=(self.fill_na,))
@@ -352,7 +350,24 @@ DOI: 10.1021/ci800038f
         return data
 
 
-def mktempfile(suffix: str = None) -> str:
+def _get_user_agent() -> str:
+    """Return a current, real browser User-Agent string.
+
+    Uses ``fake-useragent``'s maintained, regularly-updated database so this
+    never needs to be hand-edited. Falls back to a hardcoded string only if
+    that database cannot be read (e.g. corrupted install).
+    """
+    try:
+        return UserAgent(
+            browsers=["Chrome", "Edge", "Firefox"],
+            os=["Windows", "Linux"],
+            platforms=["desktop"],
+        ).random
+    except Exception:
+        return _FALLBACK_USER_AGENT
+
+
+def mktempfile(suffix: str | None = None) -> str:
     """Return the path to a writeable temporary file."""
     file = tempfile.mkstemp(suffix=suffix)
     os.close(file[0])
@@ -385,34 +400,28 @@ def fix_bond_blocks(path: str) -> None:
     os.rename(temp_out, path)
 
 
-def convert_to_numeric(
-    series: pd.Series, fill_value: Optional[Union[float, str]] = None
-) -> pd.Series:
+def convert_to_numeric(series: pd.Series, fill_value: float | str | None = None) -> pd.Series:
     """Convert a ``pandas.Series`` to numeric dtype.
-    ``pd.to_numeric`` does not handle nans, so this function masks the nans, converts and then
-    reinserts them.
 
     :param series: series to convert.
     :param fill_value: value to replace NaN values by
     :return: the converted series
     """
-    # Identify NAs, convert to numeric and set NAs back
-    nan_mask = pd.isna(series)
-    series[nan_mask] = 0
     column = pd.to_numeric(series, errors="coerce")
-    column[nan_mask] = np.nan
-    # Replace NaNs by custom value
+    # Replace NaNs (and Mold2's own "undefined" sentinel) by a custom value
     if fill_value is not None:
-        mask = pd.isna(column) | (
-            column == 3.4028199999999998e38
-        )  # undefined Mold2 value
-        if np.isreal(fill_value):
-            fn = lambda x: fill_value  # noqa: E731
-        elif isinstance(fill_value, str) and fill_value.lower() == "nan":
+        # Fill values (means, medians, custom floats) are never integral, so make sure
+        # the column can hold them before assigning into it (pandas 3 no longer
+        # silently upcasts int64 columns on item assignment).
+        column = column.astype("float64")
+        mask = pd.isna(column) | (column == _MOLD2_UNDEFINED_VALUE)
+        if isinstance(fill_value, str) and fill_value.lower() == "nan":
             fn = lambda x: np.nan  # noqa: E731
-        elif fill_value == "median":
+        elif isinstance(fill_value, str) and fill_value.lower() == "median":
             fn = np.median
-        elif fill_value == "mean":
+        elif isinstance(fill_value, str) and fill_value.lower() == "mean":
             fn = np.mean
-        column[mask] = fn(column[~mask])
+        else:
+            fn = lambda x: fill_value  # noqa: E731
+        column.loc[mask] = fn(column[~mask])
     return column
