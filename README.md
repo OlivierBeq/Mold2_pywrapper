@@ -46,7 +46,7 @@ If you use this wrapper in your research, please cite the original Mold² public
 
 ## 🛠️ Requirements
 
--   Python 3.9+
+-   Python 3.11+
 -   [RDKit](https://www.rdkit.org/docs/Install.html)
 
 ## 📦 Installation
@@ -124,10 +124,13 @@ This project is licensed under the MIT License - see the [LICENSE](https://githu
 ## 📚 API Documentation
 
 ```python
-def calculate(mols, show_banner=True, njobs=1, chunksize=100):
+def calculate(mols, show_banner=True, njobs=1, chunksize=1000):
 ```
 
-Default method to calculate #### Parameters
+Calculates Mold2 molecular descriptors. If executables have not previously been downloaded, attempts to
+download and install them.
+
+#### Parameters
 
 - ***mols  : Iterable[Chem.Mol]***  
   RDKit molecule objects for which to obtain Mold2 descriptors.
@@ -137,9 +140,8 @@ Default method to calculate #### Parameters
   Maximum number of simultaneous processes.
 - ***chunksize  : int***  
   Maximum number of molecules each process is charged of.
-- ***return_type  : pd.DataFramce***  
-  Pandas DataFrame containing Mold2 molecular descriptors.Mold2 descriptors.
-  If executables have not previously been downloaded, attempts to download and install them.
+- ***return_type  : pd.DataFrame***  
+  Pandas DataFrame containing Mold2 molecular descriptors.
 
 ________________
 
