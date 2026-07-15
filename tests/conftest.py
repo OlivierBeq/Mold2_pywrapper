@@ -26,10 +26,15 @@ def real_mold2_zip() -> str:
 
 @pytest.fixture
 def isolated_zipfile_path(tmp_path, monkeypatch):
-    """Redirect Mold2's ZIP cache path to an isolated temp dir for the duration of a test."""
-    fake_path = str(tmp_path / "Mold2-cache" / "Mold2-Executable-File.zip")
-    monkeypatch.setattr(Mold2, "_zipfile_path", staticmethod(lambda: fake_path))
-    return fake_path
+    """Redirect Mold2's ZIP cache to an isolated temp dir for the duration of a test.
+
+    Uses PYSTOW_HOME rather than monkeypatching Mold2._zipfile_path directly: worker
+    processes spawned by ProcessPoolExecutor (njobs > 1) don't inherit in-memory
+    monkeypatches on Windows (multiprocessing start method "spawn" re-imports the
+    module fresh), but they do inherit the parent's environment variables.
+    """
+    monkeypatch.setenv("PYSTOW_HOME", str(tmp_path / "pystow-home"))
+    return Mold2._zipfile_path()
 
 
 @pytest.fixture

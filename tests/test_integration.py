@@ -1,6 +1,7 @@
 import gc
 import os
 import shutil
+import sys
 import tempfile
 
 import pytest
@@ -75,5 +76,6 @@ class TestExtractExecutables:
         assert os.path.isfile(os.path.join(base, "Windows", "Mold2.exe"))
         assert os.path.isfile(os.path.join(base, "Windows", "Mold2.bat"))
         assert os.path.isfile(os.path.join(base, "Linux_x86-64", "Mold2"))
-        mode = os.stat(os.path.join(base, "Linux_x86-64", "Mold2")).st_mode
-        assert mode & 0o100  # executable by owner
+        if sys.platform in ("linux", "darwin"):
+            mode = os.stat(os.path.join(base, "Linux_x86-64", "Mold2")).st_mode
+            assert mode & 0o100  # executable by owner
